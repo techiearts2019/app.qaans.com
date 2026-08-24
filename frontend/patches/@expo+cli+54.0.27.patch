@@ -1,0 +1,17 @@
+diff --git a/node_modules/@expo/cli/build/src/start/server/middleware/inspector/JsInspector.js b/node_modules/@expo/cli/build/src/start/server/middleware/inspector/JsInspector.js
+index 87a5241..a4d55fd 100644
+--- a/node_modules/@expo/cli/build/src/start/server/middleware/inspector/JsInspector.js
++++ b/node_modules/@expo/cli/build/src/start/server/middleware/inspector/JsInspector.js
+@@ -73,7 +73,11 @@ async function queryAllInspectorAppsAsync(metroServerOrigin) {
+     const resp = await fetch(`${metroServerOrigin}/json/list`);
+     // The newest runtime will be at the end of the list,
+     // reversing the result would save time from try-error.
+-    const apps = (await resp.json()).reverse();
++    // Guard against non-array payloads (Metro may return {} or null on
++    // some versions) which used to crash with:
++    //   TypeError: (intermediate value).reverse is not a function
++    const _payload = await resp.json().catch(()=>null);
++    const apps = (Array.isArray(_payload) ? _payload : []).reverse();
+     const results = [];
+     for (const app of apps){
+         // Only use targets with better reloading support

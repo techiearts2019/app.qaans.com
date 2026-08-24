@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "scripts": {
     "preinstall": "./scripts/cmd-guard.js --preinstall",
+    "postinstall": "patch-package",
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
@@ -17,10 +18,10 @@
     "@react-native-async-storage/async-storage": "2.2.0",
     "date-fns": "4.1.0",
     "dayjs": "1.11.13",
-    "expo": "54.0.35",
+    "expo": "~54.0.37",
     "expo-blur": "15.0.8",
     "expo-camera": "~17.0.10",
-    "expo-constants": "18.0.13",
+    "expo-constants": "~18.0.14",
     "expo-font": "14.0.12",
     "expo-haptics": "15.0.8",
     "expo-image": "3.0.11",
@@ -53,6 +54,8 @@
     "eslint": "9.25.0",
     "eslint-config-expo": "10.0.0",
     "expo-doctor": "1.19.8",
+    "patch-package": "8.0.1",
+    "postinstall-postinstall": "2.1.0",
     "typescript": "5.9.3"
   },
   "resolutions": {
