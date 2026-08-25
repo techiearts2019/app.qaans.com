@@ -41,6 +41,8 @@ export default function FaceAttendance() {
   const [phase, setPhase] = useState<Phase>("scanning");
   const [action, setAction] = useState<"Check-in" | "Check-out">("Check-in");
   const [isFocused, setIsFocused] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [matched, setMatched] = useState<FaceMatchResult["employee"] | null>(null);
   const [matchTime, setMatchTime] = useState<string>("");
@@ -66,7 +68,10 @@ export default function FaceAttendance() {
   const ringPulse = useRef(new Animated.Value(0)).current;
   const cornerOpacity = useRef(new Animated.Value(0.7)).current;
 
-  // Pause / resume scanning when the screen gains or loses focus
+  // Pause / resume scanning when the screen gains or loses focus.
+  // NOTE: expo-router's useFocusEffect can be flaky on Android release
+  // builds for the initial route, so we ALSO force isFocused=true on mount
+  // (see the useEffect below). That guarantees polling starts on cold boot.
   useFocusEffect(
     useCallback(() => {
       setIsFocused(true);
@@ -87,6 +92,14 @@ export default function FaceAttendance() {
       };
     }, [])
   );
+
+  // Belt-and-braces: on initial mount, ensure polling can start even if
+  // useFocusEffect misfires on Android APKs.
+  useEffect(() => {
+    setIsFocused(true);
+    setPhase("scanning");
+    api.listEmployees().then(setEmployees).catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     if (!permission) requestPermission();
@@ -147,6 +160,8 @@ export default function FaceAttendance() {
   useEffect(() => {
     if (!isFocused) return;
     if (phase !== "scanning") return;
+    if (!cameraReady) return; // wait until the CameraView surface is ready
+    if (!permission?.granted) return;
 
     let cancelled = false;
 
@@ -157,13 +172,18 @@ export default function FaceAttendance() {
       busyRef.current = true;
       setInFlight(true);
       try {
+        // NOTE: `shutterSound` and `skipProcessing` are removed. On APK builds
+        // `skipProcessing: true` frequently returns a URI whose file isn't
+        // fully written when the promise resolves, making the subsequent
+        // ImageManipulator.manipulate() step fail silently.
         const pic = await cam.takePictureAsync({
           quality: 0.5,
           base64: false,
-          skipProcessing: true,
-          shutterSound: false,
         });
-        if (cancelled || !pic?.uri) return;
+        if (cancelled || !pic?.uri) {
+          setScanError("Camera did not return a frame. Retrying…");
+          return;
+        }
 
         // Downscale to 480px wide so backend HOG detection is fast and payload stays tiny
         const ctx = ImageManipulator.manipulate(pic.uri).resize({ width: 480 });
@@ -173,7 +193,10 @@ export default function FaceAttendance() {
           compress: 0.6,
           base64: true,
         });
-        if (cancelled || !small.base64) return;
+        if (cancelled || !small.base64) {
+          setScanError("Could not compress the captured frame. Retrying…");
+          return;
+        }
 
         const res = await api.matchFace({
           image_b64: small.base64,
@@ -181,6 +204,9 @@ export default function FaceAttendance() {
           threshold: 0.6,
         });
         if (cancelled) return;
+
+        // request succeeded — clear any earlier surfaced error
+        setScanError(null);
 
         setFacesInFrame(res.faces_detected ?? 0);
         // Update box overlay with every response — matched flag decides colour.
@@ -218,8 +244,10 @@ export default function FaceAttendance() {
           // noop
         }
       } catch (e) {
-        // ignore transient errors and keep scanning
+        // Surface a short error so the user (and QA on APK builds) can see it.
+        const msg = e instanceof Error ? e.message : String(e);
         console.warn("match tick failed", e);
+        setScanError(`Scan failed: ${msg.slice(0, 80)}`);
       } finally {
         busyRef.current = false;
         setInFlight(false);
@@ -233,7 +261,7 @@ export default function FaceAttendance() {
       cancelled = true;
       clearInterval(t);
     };
-  }, [phase, isFocused, action]);
+  }, [phase, isFocused, action, cameraReady, permission?.granted]);
 
   const resumeScan = useCallback(() => {
     try {
@@ -299,8 +327,6 @@ export default function FaceAttendance() {
       const pic = await cam.takePictureAsync({
         quality: 0.7,
         base64: false,
-        skipProcessing: true,
-        shutterSound: false,
       });
       if (!pic?.uri) throw new Error("Camera capture failed");
       const ctx = ImageManipulator.manipulate(pic.uri).resize({ width: 640 });
@@ -401,6 +427,15 @@ export default function FaceAttendance() {
           style={StyleSheet.absoluteFill}
           facing={facing}
           testID="face-camera-view"
+          onCameraReady={() => setCameraReady(true)}
+          onMountError={(e) => {
+            console.warn("camera mount error", e);
+            setScanError(
+              `Camera failed to start: ${
+                (e as { message?: string })?.message ?? "unknown"
+              }`
+            );
+          }}
           onLayout={(e) => {
             const { width, height } = e.nativeEvent.layout;
             setCameraLayout({ w: width, h: height });
@@ -513,6 +548,15 @@ export default function FaceAttendance() {
           </Pressable>
         </View>
       </SafeAreaView>
+
+      {scanError ? (
+        <View style={styles.errorBanner} testID="scan-error-banner">
+          <Ionicons name="warning-outline" size={14} color={colors.white} />
+          <Text style={styles.errorBannerText} numberOfLines={2}>
+            {scanError}
+          </Text>
+        </View>
+      ) : null}
 
       {/* Frame */}
       <View style={styles.frameWrap} pointerEvents="none">
@@ -1195,6 +1239,26 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     // subtle inner glow via shadow-like border style; RN doesn't do glow,
     // we compensate with a bright colour.
+  },
+  errorBanner: {
+    position: "absolute",
+    top: 96,
+    left: 16,
+    right: 16,
+    backgroundColor: "rgba(220, 38, 38, 0.92)",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    zIndex: 20,
+  },
+  errorBannerText: {
+    flex: 1,
+    color: colors.white,
+    fontSize: 12,
+    fontWeight: "600",
   },
   faceBoxLabel: {
     position: "absolute",
