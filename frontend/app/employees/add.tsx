@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Image } from "expo-image";
+import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -125,10 +126,12 @@ export default function AddEmployee() {
   const capture = async () => {
     try {
       if (cameraRef.current) {
+        // NOTE: `skipProcessing` is removed — on Android APKs the URI it
+        // returns is not fully written when the promise resolves, which
+        // breaks the base64 conversion below.
         const pic = await cameraRef.current.takePictureAsync({
           quality: 0.4,
           base64: false,
-          skipProcessing: true,
         });
         if (pic?.uri) set("photo", pic.uri);
       }
@@ -136,6 +139,32 @@ export default function AddEmployee() {
       // ignore
     }
     setCameraOpen(false);
+  };
+
+  /** Convert a local file URI (or already-http URL) to a base64 JPEG the
+   *  backend can store. Skips conversion for http(s) URLs since those are
+   *  already reachable server-side (e.g. Unsplash seed photos). */
+  const encodePhotoForUpload = async (
+    uri: string
+  ): Promise<{ photo?: string; photo_b64?: string }> => {
+    if (uri.startsWith("http://") || uri.startsWith("https://")) {
+      return { photo: uri };
+    }
+    if (uri.startsWith("data:")) {
+      // strip the data-url prefix — backend re-adds it
+      const b64 = uri.split(",", 2)[1] ?? uri;
+      return { photo_b64: b64 };
+    }
+    // local file:// URI — downscale + base64
+    const ctx = ImageManipulator.manipulate(uri).resize({ width: 640 });
+    const rendered = await ctx.renderAsync();
+    const small = await rendered.saveAsync({
+      format: SaveFormat.JPEG,
+      compress: 0.7,
+      base64: true,
+    });
+    if (!small.base64) throw new Error("Could not encode captured photo");
+    return { photo_b64: small.base64 };
   };
 
   const onSave = async () => {
@@ -150,6 +179,9 @@ export default function AddEmployee() {
     const projMatch = projects.find((p) => p.name === form.project);
     setSaving(true);
     try {
+      const photoParts = form.photo
+        ? await encodePhotoForUpload(form.photo)
+        : {};
       await api.createEmployee({
         name: form.name,
         code: form.empCode,
@@ -172,7 +204,7 @@ export default function AddEmployee() {
         uan: form.uan || undefined,
         esi: form.esi || undefined,
         status: projMatch ? "Active" : "No Allocation",
-        photo: form.photo,
+        ...photoParts,
         project_id: projMatch?.id,
       });
       setToast({
@@ -183,11 +215,19 @@ export default function AddEmployee() {
       setTimeout(() => router.replace("/employees"), 900);
     } catch (e) {
       console.warn("create employee failed", e);
-      setToast({
-        visible: true,
-        message: "Failed to save employee. Try again.",
-        type: "error",
-      });
+      // Surface the backend's 422 friendly detail if present (bad photo)
+      let msg = "Failed to save employee. Try again.";
+      const raw = e instanceof Error ? e.message : "";
+      const jsonStart = raw.indexOf("{");
+      if (jsonStart >= 0) {
+        try {
+          const parsed = JSON.parse(raw.slice(jsonStart));
+          if (typeof parsed?.detail === "string") msg = parsed.detail;
+        } catch {
+          // keep default
+        }
+      }
+      setToast({ visible: true, message: msg, type: "error" });
     } finally {
       setSaving(false);
     }

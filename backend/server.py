@@ -473,6 +473,11 @@ class EmployeeIn(BaseModel):
     esi: Optional[str] = None
     status: str = "Active"
     photo: Optional[str] = None
+    # Base64-encoded JPEG captured on the device. If present, the backend
+    # stores it as a `data:image/jpeg;base64,…` URL AND computes the face
+    # encoding server-side. Prefer this over `photo` for device captures so
+    # we never persist unreachable local URIs like `file:///data/user/0/...`.
+    photo_b64: Optional[str] = None
     project_id: Optional[str] = None
 
 
@@ -919,9 +924,40 @@ def list_employees(
 
 @api.post("/employees", response_model=EmployeeOut)
 def create_employee(payload: EmployeeIn):
+    # Reject any client that tries to persist a device-local file URI as
+    # `photo`. Such URIs (file:///data/user/0/…) are only reachable on the
+    # device that captured them, so the backend can never fetch them for
+    # server-side face matching.
+    if payload.photo and payload.photo.startswith("file:"):
+        raise HTTPException(
+            422,
+            "Local file URIs are not allowed for photos. Send `photo_b64` "
+            "instead so the backend can store a reachable copy.",
+        )
+
+    face_encoding_json: Optional[str] = None
+    stored_photo: Optional[str] = payload.photo
+
+    if payload.photo_b64:
+        pil = _decode_b64_pil(payload.photo_b64)
+        if pil is None:
+            raise HTTPException(400, "Could not decode photo_b64")
+        frame = np.array(pil)
+        enc, err = _assess_enrolment(frame, pil)
+        if err is not None or enc is None:
+            raise HTTPException(422, err or "Photo quality check failed")
+        face_encoding_json = json.dumps(enc.tolist())
+        b64 = payload.photo_b64
+        if not b64.startswith("data:"):
+            b64 = f"data:image/jpeg;base64,{b64}"
+        stored_photo = b64
+
     with SessionLocal() as db:
-        data = payload.model_dump(exclude={"project_id"})
+        data = payload.model_dump(exclude={"project_id", "photo_b64", "photo"})
         emp = Employee(**data)
+        emp.photo = stored_photo
+        if face_encoding_json:
+            emp.face_encoding = face_encoding_json
         db.add(emp)
         db.flush()
         if payload.project_id:

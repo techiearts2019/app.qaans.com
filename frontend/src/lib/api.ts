@@ -67,6 +67,10 @@ export type EmployeeInput = {
   esi?: string;
   status?: EmployeeStatus;
   photo?: string;
+  /** Base64 JPEG of the captured photo. Preferred over `photo` for
+      device-captured shots — the backend converts to a data URL and
+      computes the face encoding server-side. */
+  photo_b64?: string;
   project_id?: string;
 };
 
