@@ -565,113 +565,6 @@ class NotificationOut(PydBase):
     type: str
 
 
-# --------------------------------------------------------- seed on startup --
-SEED_SUPERVISOR = dict(
-    name="Rajesh Verma",
-    code="SUP-0007",
-    email="rajesh.verma@dihadi.in",
-    phone="+91 99999 88888",
-    designation="Senior Supervisor",
-    joining_date="12 Jan 2022",
-    photo="https://images.unsplash.com/photo-1679679811837-c28b2586f533?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTJ8MHwxfHNlYXJjaHwyfHx3b3JrZXIlMjBwb3J0cmFpdHxlbnwwfHx8fDE3ODI1NTEzODB8MA&ixlib=rb-4.1.0&q=85",
-)
-
-SEED_EMPLOYEES = [
-    dict(id="e1", name="Ramesh Kumar", name_hi="रमेश कुमार", code="DHD-1042",
-         designation="Site Supervisor", skill="Supervision", status="Active",
-         primary_mobile="+91 98231 45678", email="ramesh.k@dihadi.in",
-         photo="https://images.unsplash.com/photo-1646227655685-a530813759b3?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTJ8MHwxfHNlYXJjaHwzfHx3b3JrZXIlMjBwb3J0cmFpdHxlbnwwfHx8fDE3ODI1NTEzODB8MA&ixlib=rb-4.1.0&q=85"),
-    dict(id="e2", name="Sunita Devi", name_hi="सुनीता देवी", code="DHD-1043",
-         designation="Helper", skill="General Labour", status="Active",
-         primary_mobile="+91 98112 33445",
-         photo="https://images.pexels.com/photos/12576220/pexels-photo-12576220.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"),
-    dict(id="e3", name="Mohan Singh", name_hi="मोहन सिंह", code="DHD-1044",
-         designation="Mason", skill="Bricklaying", status="No Allocation",
-         primary_mobile="+91 97650 12000",
-         photo="https://images.pexels.com/photos/9227535/pexels-photo-9227535.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"),
-    dict(id="e4", name="Anil Yadav", name_hi="अनिल यादव", code="DHD-1045",
-         designation="Electrician", skill="Wiring", status="Inactive",
-         primary_mobile="+91 96007 23498",
-         photo="https://images.unsplash.com/photo-1679679811837-c28b2586f533?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTJ8MHwxfHNlYXJjaHwyfHx3b3JrZXIlMjBwb3J0cmFpdHxlbnwwfHx8fDE3ODI1NTEzODB8MA&ixlib=rb-4.1.0&q=85"),
-    dict(id="e5", name="Priya Sharma", name_hi="प्रिया शर्मा", code="DHD-1046",
-         designation="Office Assistant", skill="Supervision", status="Active",
-         primary_mobile="+91 95002 78122", email="priya.s@dihadi.in",
-         photo="https://images.pexels.com/photos/37556467/pexels-photo-37556467.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"),
-]
-
-SEED_PROJECTS = [
-    dict(id="p1", name="Skyline Tower A", location="Sector 62, Noida",
-         start_date="12 Jan 2026", status="Active",
-         cover="https://images.unsplash.com/photo-1503387762-592deb58ef4e?auto=format&fit=crop&w=900&q=60",
-         allocations=["e1", "e2", "e5"]),
-    dict(id="p2", name="Greenfield Mall Renovation", location="MG Road, Gurgaon",
-         start_date="03 Nov 2025", status="Active",
-         cover="https://images.unsplash.com/photo-1541888946425-d81bb19240f5?auto=format&fit=crop&w=900&q=60",
-         allocations=["e4"]),
-    dict(id="p3", name="Riverside Villas Phase 2", location="Yamuna Expressway",
-         start_date="20 Aug 2025", status="On Hold",
-         cover="https://images.unsplash.com/photo-1572120360610-d971b9d7767c?auto=format&fit=crop&w=900&q=60",
-         allocations=[]),
-    dict(id="p4", name="Metro Line Extension", location="Dwarka, Delhi",
-         start_date="05 Feb 2025", status="Completed",
-         cover="https://images.unsplash.com/photo-1487958449943-2429e8be8625?auto=format&fit=crop&w=900&q=60",
-         allocations=[]),
-]
-
-SEED_ATTENDANCE = [
-    ("e1", "Check-in", "08:42 AM", "On Time"),
-    ("e2", "Check-in", "09:05 AM", "Late"),
-    ("e5", "Check-in", "08:55 AM", "On Time"),
-]
-
-SEED_SALARY = [
-    ("e1", "Feb 26", 26, 750, 200, "Paid"),
-    ("e2", "Feb 26", 24, 550, 100, "Paid"),
-    ("e3", "Feb 26", 22, 700, 0, "Pending"),
-    ("e4", "Feb 26", 18, 800, 300, "Processing"),
-    ("e5", "Feb 26", 26, 600, 150, "Paid"),
-]
-
-SEED_NOTIFICATIONS = [
-    ("Attendance marked", "Ramesh Kumar checked in at 08:42 AM", "10 mins ago", False, "attendance"),
-    ("New employee added", "Priya Sharma (DHD-1046) has been added to your team", "1 hour ago", False, "employee"),
-    ("Salary processed", "December salary cycle completed for 48 employees", "Yesterday", True, "salary"),
-    ("Attendance marked", "Sunita Devi checked in at 09:05 AM (Late)", "Yesterday", True, "attendance"),
-    ("Employee records updated", "Mohan Singh's allocation has been updated", "2 days ago", True, "employee"),
-]
-
-
-def seed_if_empty() -> None:
-    with SessionLocal() as db:
-        if db.query(Supervisor).count() == 0:
-            db.add(Supervisor(**SEED_SUPERVISOR))
-        if db.query(Employee).count() == 0:
-            for e in SEED_EMPLOYEES:
-                db.add(Employee(**e))
-        if db.query(Project).count() == 0:
-            allocs: list[tuple[str, str]] = []
-            for p in SEED_PROJECTS:
-                emps = p.pop("allocations")
-                db.add(Project(**p))
-                for eid in emps:
-                    allocs.append((p["id"], eid))
-            db.flush()
-            for pid, eid in allocs:
-                db.add(Allocation(project_id=pid, employee_id=eid))
-        if db.query(AttendanceRecord).count() == 0:
-            for eid, t, tm, st in SEED_ATTENDANCE:
-                db.add(AttendanceRecord(employee_id=eid, type=t, time=tm, status=st))
-        if db.query(SalaryRecord).count() == 0:
-            for eid, m, dw, rate, ded, st in SEED_SALARY:
-                db.add(SalaryRecord(employee_id=eid, month=m, days_worked=dw,
-                                    daily_rate=rate, deductions=ded, status=st))
-        if db.query(Notification).count() == 0:
-            for title, desc, tl, r, tp in SEED_NOTIFICATIONS:
-                db.add(Notification(title=title, description=desc, time_label=tl,
-                                    read=1 if r else 0, type=tp))
-        db.commit()
-
-
 # --------------------------------------------------------- app / lifespan --
 def warm_face_encodings() -> None:
     """Compute + cache face_encoding for enrolled employees whose photo is a URL.
@@ -697,7 +590,9 @@ def warm_face_encodings() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
-    seed_if_empty()
+    # NOTE: No seed data is inserted at startup. The DB starts empty.
+    # To bootstrap a supervisor account (needed for OTP login), run:
+    #   python scripts/create_supervisor.py --email you@company.com --name "Your Name"
     try:
         warm_face_encodings()
     except Exception as e:
