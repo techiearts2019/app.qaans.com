@@ -186,10 +186,9 @@ metadata:
 
 test_plan:
   current_focus:
-    - "POST /api/employees/{emp_id}/enroll-face"
-    - "POST /api/attendance/match"
-    - "Enroll face flow (in-app)"
-    - "Face Attendance auto-detect and mark"
+    - "Add Employee photo saving (photo_b64 → data URL + face_encoding)"
+    - "POST /api/employees create_employee"
+    - "Frontend encodePhotoForUpload"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -279,3 +278,50 @@ agent_communication:
         - When two faces of the same employee are in the frame, only ONE
           attendance record is created (per-frame dedupe).
 
+
+
+  - agent: "main"
+    message: >
+      Round-N bug fix — "Add Employee photo not saved". Reported symptom:
+      employee record was created but `photo` and `face_encoding` columns
+      remained NULL.
+
+      Root cause (hypothesised): the fluent `ImageManipulator.manipulate()
+      .renderAsync().saveAsync({base64:true})` chain silently returned an
+      undefined `base64` on some Android APK builds, so the frontend fell
+      through and called `createEmployee` without the photo payload.
+
+      Fixes applied:
+
+      BACKEND (server.py) — unchanged from previous iteration:
+      - `POST /api/employees` accepts `photo_b64`. When present it decodes,
+        runs the enrolment quality gate, computes the 128-d face encoding,
+        stores the photo as a `data:image/jpeg;base64,...` URL AND the
+        encoding as JSON.
+      - `photo` starting with `file:` is rejected with 422.
+
+      FRONTEND (frontend/app/employees/add.tsx):
+      - Switched `encodePhotoForUpload()` from the fluent
+        `ImageManipulator.manipulate().renderAsync().saveAsync()` chain
+        to the legacy `ImageManipulator.manipulateAsync(uri, actions,
+        options)` which is more reliable on APK builds.
+      - New defensive guard in `onSave`: if `encodePhotoForUpload` throws
+        OR returns an empty object, show a toast and DO NOT call
+        `createEmployee`. This makes it impossible to create a photo-less
+        record when the user selected a photo.
+      - Same reliability fix applied to `frontend/app/(tabs)/attendance.tsx`
+        (scan loop + enrol modal) for consistency.
+
+      Please verify:
+      1) `POST /api/employees` with `photo_b64` returns 200, stored `photo`
+         is a `data:image/jpeg;base64,...` URL, `face_encoding` is JSON of
+         length ~2777.
+      2) `POST /api/employees` with `photo` = "file:///..." returns 422
+         with friendly detail.
+      3) After creation, `POST /api/attendance/match` with the same base64
+         returns `matched=true`, `distance` close to 0, and the newly
+         created employee id.
+      4) Frontend Add-Employee flow (via UI test IDs) still renders and
+         `save-employee-button` triggers a proper POST when photo is set.
+
+      Reference smoke: /tmp/repro_photo_save.py (already re-verified).

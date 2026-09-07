@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Image } from "expo-image";
-import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
+import * as ImageManipulator from "expo-image-manipulator";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Speech from "expo-speech";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -186,13 +186,15 @@ export default function FaceAttendance() {
         }
 
         // Downscale to 480px wide so backend HOG detection is fast and payload stays tiny
-        const ctx = ImageManipulator.manipulate(pic.uri).resize({ width: 480 });
-        const rendered = await ctx.renderAsync();
-        const small = await rendered.saveAsync({
-          format: SaveFormat.JPEG,
-          compress: 0.6,
-          base64: true,
-        });
+        const small = await ImageManipulator.manipulateAsync(
+          pic.uri,
+          [{ resize: { width: 480 } }],
+          {
+            compress: 0.6,
+            format: ImageManipulator.SaveFormat.JPEG,
+            base64: true,
+          }
+        );
         if (cancelled || !small.base64) {
           setScanError("Could not compress the captured frame. Retrying…");
           return;
@@ -329,13 +331,15 @@ export default function FaceAttendance() {
         base64: false,
       });
       if (!pic?.uri) throw new Error("Camera capture failed");
-      const ctx = ImageManipulator.manipulate(pic.uri).resize({ width: 640 });
-      const rendered = await ctx.renderAsync();
-      const small = await rendered.saveAsync({
-        format: SaveFormat.JPEG,
-        compress: 0.75,
-        base64: true,
-      });
+      const small = await ImageManipulator.manipulateAsync(
+        pic.uri,
+        [{ resize: { width: 640 } }],
+        {
+          compress: 0.75,
+          format: ImageManipulator.SaveFormat.JPEG,
+          base64: true,
+        }
+      );
       if (!small.base64) throw new Error("Could not encode capture");
       const res = await api.enrollFace(enrollEmp.id, {
         image_b64: small.base64,

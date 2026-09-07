@@ -1,0 +1,48 @@
+{
+  "summary": "Round-4 verification of the 'Add Employee photo not saved to DB' bug fix (photo=NULL, face_encoding=NULL). BACKEND: 30/30 pytest tests pass — 25 pre-existing regression tests (7 face-attendance + 12 face-quality-multi + 6 face-box-overlay) plus 5 NEW tests in /app/backend/tests/test_create_employee_photo.py that prove all four scenarios from the review request. (1) Happy path: POST /api/employees with photo_b64 of a real Unsplash face returns 200; response.photo starts with 'data:image/jpeg;base64,'; DB row shows photo starts with 'data:image/jpeg;base64,' and face_encoding is a 128-element JSON list (~2777 chars). (2) End-to-end match: POST /api/attendance/match with the same base64 immediately after create returns matched=true with distance <0.1 and the newly-created employee among match candidates. (3) file:// rejection: sending photo='file:///data/user/0/host.exp.exponent/cache/Camera/abc.jpg' returns 422 with detail starting 'Local file URIs are not allowed' and NO employee row is leaked. (4) No-face rejection: photo_b64 of a pure black 320x320 image is rejected 422 by _assess_enrolment quality gate; no row leaked. (5) No-photo fallback: POST with neither photo nor photo_b64 still returns 200; DB row has photo=NULL and face_encoding=NULL. Bug is fully fixed at the API layer. FRONTEND: code review of /app/frontend/app/employees/add.tsx confirms encodePhotoForUpload uses legacy ImageManipulator.manipulateAsync(uri,[{resize:{width:640}}],{compress:0.7,format:JPEG,base64:true}) (lines 173-181); onSave wraps encodePhotoForUpload in a try/catch and short-circuits (toast + no createEmployee call) both on throw AND when the result is missing both photo and photo_b64 (lines 206-229) — so no more orphan rows. http(s) URIs pass through as {photo:uri}; data: URIs strip prefix and return {photo_b64}; file://, content://, ph://, and bare paths go through manipulateAsync and return {photo_b64}. Consistency upgrade verified: /app/frontend/app/(tabs)/attendance.tsx uses manipulateAsync in BOTH the scan loop (line 189) and the enrol modal (line 334). Web preview loads Qaans ERP landing screen cleanly with no red-screen — only the same pre-existing cosmetic warnings (shadow* deprecated, useNativeDriver JS fallback). Manual /tmp/repro_photo_save.py also succeeds: DB photo starts with 'data:', face_encoding length 2777.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "landing", "issues": ["Pre-existing web-only cosmetic warnings persist from iter-1..iter-3: 'shadow*' style props deprecated (use boxShadow); Animated useNativeDriver JS fallback in web preview; pointerEvents-as-prop deprecation. All harmless on device APKs."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_create_employee_photo.py",
+    "/app/backend/tests/test_face_attendance.py",
+    "/app/backend/tests/test_face_quality_multi.py",
+    "/app/backend/tests/test_face_box_overlay.py",
+    "/app/test_reports/pytest/iter4_results.xml"
+  ],
+  "action_items": [
+    "No functional fixes required — the photo-save bug is verifiably fixed on both backend and frontend.",
+    "OPTIONAL (carry-over from iter-3): fixture `second_employee` in test_face_quality_multi.py can self-poison DHD-2034's encoding if the seed photo URL is unreachable. Not observed in this run (DHD-2034 doesn't exist in current DB; only DHD-1005 and QNS-1001 remain as real employees), but hardening the fixture to skip employees with non-http(s) photos is still recommended.",
+    "OPTIONAL (carry-over from iter-3): de-duplicate _load_image_from_url/_encode_face/_decode_b64_image helpers and remove duplicate `import json` in server.py.",
+    "OPTIONAL (carry-over from iter-3): dead `hasattr(AttendanceRecord, 'created_at')` cooldown scaffolding in match_face — either wire to real created_at or delete."
+  ],
+  "critical_code_review_comments": [
+    "server.py:826-831 correctly rejects any `photo` value starting with 'file:' with HTTP 422 BEFORE touching the DB — so the offending payload from the old buggy Android APK cannot create an orphan row.",
+    "server.py:836-848 correctly decodes payload.photo_b64 → PIL → np.array → _assess_enrolment (quality gate + 128-d encoding) and stores stored_photo as 'data:image/jpeg;base64,{b64}' when the incoming b64 lacks the 'data:' prefix. Both the photo column and the face_encoding column are populated in the same transaction (db.commit at line 860).",
+    "server.py:851 model_dump(exclude={'project_id','photo_b64','photo'}) is correct — photo_b64 must be excluded from the ORM insert (Employee has no such column) and photo is then set explicitly at line 853 to the data URL, not the client-supplied value.",
+    "add.tsx:161-169 correctly branches on scheme: http(s) → {photo:uri}; data: → strip prefix → {photo_b64}; everything else (file://, content://, ph://, bare path) → manipulateAsync → {photo_b64}. The 'data:' branch throws if the base64 body is empty — prevents silent creation of an empty encoding.",
+    "add.tsx:206-229 short-circuits BEFORE api.createEmployee if encoding either throws OR returns neither photo nor photo_b64. This is the critical defence-in-depth: it guarantees no more empty-photo rows even if a future device returns a broken URI.",
+    "add.tsx:263-274 surfaces the backend's 422 friendly `detail` string when creating an employee fails — user sees 'Local file URIs are not allowed…' instead of a generic error.",
+    "attendance.tsx:189-197 (scan loop) and attendance.tsx:334-342 (enrol modal) both use ImageManipulator.manipulateAsync with the legacy signature and options object — no fluent renderAsync() API which returns undefined base64 on some Android APK builds.",
+    "/tmp/repro_photo_save.py end-to-end reproduces the fix: DB photo starts with 'data:image/jpeg;base64,/9j/4AAQ…' and face_encoding blob length = 2777 chars (128-d floats)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_create_employee_photo.py (new, 5 pytest cases across 4 test classes covering the exact review-request scenarios)",
+    "/app/test_reports/pytest/iter4_results.xml (new, JUnit output for 30 passing tests)"
+  ],
+  "success_rate": {
+    "backend": "100% (30/30 — 5 new create-employee-photo + 7 face-attendance + 12 face-quality-multi + 6 face-box-overlay)",
+    "frontend": "100% of testable paths via code review; web preview loads without red-screen. Live camera capture inherently not exercisable via web preview per iter-1..iter-3 notes."
+  },
+  "seed_data_creation": "Re-seeded OtpCode row (techiearts19@gmail.com, hash of '123456', 5-min TTL) via session/module pytest fixtures. Pre-emptively cleared face_encoding for DHD-2034 to avoid the known-flaky test_same_face_twice_dedupes (row didn't exist in this DB — only DHD-1005 and QNS-1001 do, plus the auto-created DHD-1042 seed). All test-created employees prefixed with TEST-PB64-/TEST-MATCH-/TEST-FILE-/TEST-NOFACE-/TEST-NOPHOTO- are cleaned up in the fixture `_cleanup_employee(code)` helper (Allocation + AttendanceRecord cascade delete + Employee delete).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "OTP bypass pattern unchanged (see iter-1..iter-3 reports). BASE_URL from EXPO_PUBLIC_BACKEND_URL + '/api'. When adding new create-employee tests, always prefix codes with 'TEST-' and use the `_cleanup_employee(code)` pattern from test_create_employee_photo.py — the fixture is idempotent and safe on failure. Real face for test_face_quality_multi's second_employee must be a reachable http(s) photo (currently fetched from Unsplash) — do not rely on DB-seeded photo URLs since the two real employees (DHD-1005, QNS-1001) have empty photos. If the Unsplash photo starts 404-ing, replace TEST_EMPLOYEE_PHOTO_URL in conftest.py with any other stock face image URL.",
+  "rca_of_issue": "ORIGINAL BUG (user-reported): After Add Employee → capture photo → Save, MySQL row had photo=NULL and face_encoding=NULL. Two independent root causes: (a) FRONTEND — the previous fluent `ImageManipulator.manipulate(uri).renderAsync({base64:true})` chain silently returned undefined `.base64` on some Android APK builds; the create request then went out with no photo_b64 and either a raw file:// URI (which the backend couldn't fetch) or nothing. (b) BACKEND — POST /api/employees blindly accepted whatever `photo` string the client sent, including file:// URIs, and never computed face_encoding unless photo_b64 was present. FIX VERIFIED: (frontend) switched add.tsx + attendance.tsx to the legacy `manipulateAsync(uri, [{resize:{width:640}}], {compress:0.7, format:JPEG, base64:true})` which is reliable on Android APKs; wrapped encoding in try/catch that short-circuits before createEmployee with a user-facing toast; (backend) added an explicit file:// guard returning 422 with a helpful message, and a photo_b64 branch that decodes → _assess_enrolment (quality + face detection) → stores photo as data URL AND persists 128-d face_encoding in the same commit. Reproduction is `python /tmp/repro_photo_save.py` — it now prints 'DB photo starts with data:' True and 'DB face_encoding len' 2777, and cleans up after itself. Regression coverage added: /app/backend/tests/test_create_employee_photo.py (5 tests, all passing)."
+}

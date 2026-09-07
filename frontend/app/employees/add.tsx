@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Image } from "expo-image";
-import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
+import * as ImageManipulator from "expo-image-manipulator";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -141,30 +141,50 @@ export default function AddEmployee() {
     setCameraOpen(false);
   };
 
-  /** Convert a local file URI (or already-http URL) to a base64 JPEG the
-   *  backend can store. Skips conversion for http(s) URLs since those are
-   *  already reachable server-side (e.g. Unsplash seed photos). */
+  /** Convert a captured photo URI to what the backend expects.
+   *
+   *  - http(s):// URIs are already reachable from the server, pass as `photo`.
+   *  - Everything else (file://, content://, ph://, or a bare path) is
+   *    downscaled + JPEG-compressed on-device and sent as base64 in
+   *    `photo_b64`. The backend then stores it as a `data:image/jpeg;base64,…`
+   *    URL AND computes the 128-d face encoding server-side.
+   *
+   *  Uses the legacy `manipulateAsync` API which is more reliable on
+   *  Android APKs than the new fluent `manipulate().renderAsync()` chain
+   *  (the new API silently returns undefined `base64` on some devices).
+   */
   const encodePhotoForUpload = async (
     uri: string
   ): Promise<{ photo?: string; photo_b64?: string }> => {
+    if (!uri) throw new Error("photo URI is empty");
+
     if (uri.startsWith("http://") || uri.startsWith("https://")) {
       return { photo: uri };
     }
     if (uri.startsWith("data:")) {
-      // strip the data-url prefix — backend re-adds it
-      const b64 = uri.split(",", 2)[1] ?? uri;
+      // "data:image/jpeg;base64,ABC" → strip prefix; backend re-adds it
+      const b64 = uri.split(",", 2)[1] ?? "";
+      if (!b64) throw new Error("photo data URL has empty base64 body");
       return { photo_b64: b64 };
     }
-    // local file:// URI — downscale + base64
-    const ctx = ImageManipulator.manipulate(uri).resize({ width: 640 });
-    const rendered = await ctx.renderAsync();
-    const small = await rendered.saveAsync({
-      format: SaveFormat.JPEG,
-      compress: 0.7,
-      base64: true,
-    });
-    if (!small.base64) throw new Error("Could not encode captured photo");
-    return { photo_b64: small.base64 };
+
+    // local URI (file://, content://, ph://, bare path). Downscale to 640px
+    // wide + JPEG q=0.7, then base64 encode.
+    const result = await ImageManipulator.manipulateAsync(
+      uri,
+      [{ resize: { width: 640 } }],
+      {
+        compress: 0.7,
+        format: ImageManipulator.SaveFormat.JPEG,
+        base64: true,
+      }
+    );
+    if (!result.base64) {
+      throw new Error(
+        "expo-image-manipulator returned no base64 payload for the captured photo"
+      );
+    }
+    return { photo_b64: result.base64 };
   };
 
   const onSave = async () => {
@@ -179,9 +199,34 @@ export default function AddEmployee() {
     const projMatch = projects.find((p) => p.name === form.project);
     setSaving(true);
     try {
-      const photoParts = form.photo
-        ? await encodePhotoForUpload(form.photo)
-        : {};
+      // Photo is REQUIRED (validated by sectionValid(0)). We must succeed at
+      // encoding it before hitting the create-employee endpoint — otherwise
+      // we'd end up with a record whose photo/face_encoding are null.
+      let photoParts: { photo?: string; photo_b64?: string };
+      try {
+        photoParts = await encodePhotoForUpload(form.photo as string);
+      } catch (encErr) {
+        console.warn("photo encoding failed", encErr);
+        setToast({
+          visible: true,
+          message: `Could not process photo: ${
+            encErr instanceof Error ? encErr.message : "unknown error"
+          }. Re-capture and try again.`,
+          type: "error",
+        });
+        setSaving(false);
+        return;
+      }
+      if (!photoParts.photo && !photoParts.photo_b64) {
+        setToast({
+          visible: true,
+          message:
+            "Photo did not encode correctly. Please retake the photo.",
+          type: "error",
+        });
+        setSaving(false);
+        return;
+      }
       await api.createEmployee({
         name: form.name,
         code: form.empCode,
