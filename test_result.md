@@ -474,3 +474,57 @@ agent_communication:
          device is set to a non-IST timezone (mock via
          `TZ=America/Los_Angeles` env or `jest.setSystemTime` if
          applicable).
+
+
+  - agent: "main"
+    message: >
+      Feature refactor — "make Edit Employee use the exact same form layout
+      and fields as Add Employee (incl. photo upload)".
+
+      REFACTOR (frontend only, no backend changes):
+      - Extracted the entire 3-step wizard from `app/employees/add.tsx`
+        into a new shared component `src/components/EmployeeForm.tsx`
+        with these props:
+          * `title` — header text
+          * `submitLabel` — primary CTA text
+          * `successMessage(name)` — toast on success
+          * `initialForm?` — optional pre-population (Edit mode)
+          * `photoIsPristine?` — when true, existing photo is round-tripped
+            unless the user re-captures (avoids re-uploading a data URL)
+          * `onSubmit({form, photo, projectId})` — create or update handler
+          * `onDelete?` — optional; when provided, a trash icon appears in
+            the header (Edit mode)
+          * `onBack?` — optional back handler
+      - `app/employees/add.tsx` is now a ~40-line thin wrapper that
+        delegates to `EmployeeForm` and calls `api.createEmployee`.
+      - `app/employees/[id].tsx` is now a thin wrapper that:
+          1. `Promise.all([getEmployee(id), listProjects()])`
+          2. Maps the Employee row → `EmployeeFormState` (identical field
+             set: photo, empCode, designation, skill, project, name,
+             gender, marital, dob, fatherName, nominee, primaryMobile,
+             altMobile, email, doj, doe, currentAddr, permanentAddr,
+             aadhaar, pan, uan, esi).
+          3. Passes `photoIsPristine` so existing photo is re-uploaded
+             only if the user re-captures.
+          4. Calls `api.updateEmployee` on submit.
+          5. Shows a delete confirm dialog on the trash icon.
+
+      Result: both routes render pixel-identical UI — same tabsRow of
+      "Personal / Contact / Documents", same photo capture pill in the
+      Personal section, same TextField/DropdownField/DatePickerField
+      ordering, same footer Back / Continue / Save button flow, same
+      camera modal.
+
+      Please verify:
+      1) `/employees/add` still renders and creates an employee end-to-end.
+      2) `/employees/{id}` renders the SAME layout with fields
+         pre-populated from the row. All 22 form fields must be present
+         and correctly filled. Data-Picker fields (dob, doj, doe) must
+         display the existing values.
+      3) In Edit mode, submitting WITHOUT re-capturing the photo must
+         send `photo` (existing data URL/http URL) and NOT `photo_b64` —
+         backend should update the row without re-computing the encoding.
+      4) In Edit mode, tapping the trash icon shows an Alert; on confirm,
+         `DELETE /api/employees/{id}` fires and returns to the list.
+      5) All 50 pytest backend tests must still pass — this is a
+         frontend-only refactor.
