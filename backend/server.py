@@ -974,6 +974,7 @@ class EmployeeUpdate(BaseModel):
 
 
 @api.patch("/employees/{emp_id}", response_model=EmployeeOut)
+@api.put("/employees/{emp_id}", response_model=EmployeeOut)
 def update_employee(emp_id: str, payload: EmployeeUpdate):
     """Partial-update an existing employee. Only fields present in the
     payload are written. If `photo_b64` is provided, the photo is stored

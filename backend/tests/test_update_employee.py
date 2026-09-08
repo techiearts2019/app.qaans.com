@@ -1,15 +1,20 @@
-"""Backend tests for PATCH /api/employees/{emp_id} (partial update)
-and DELETE /api/employees/{emp_id} (cascade delete).
+"""Backend tests for PATCH /api/employees/{emp_id} AND PUT /api/employees/{emp_id}
+(partial update via stacked decorators) and DELETE /api/employees/{emp_id}
+(cascade delete).
 
-Covers the six scenarios from the review-request:
+Every update scenario is parametrized over BOTH HTTP methods so we prove that
+the two decorators produce two distinct, functionally-identical routes.
+
+Scenarios (each × {PATCH, PUT}):
   1. auth: 401 without Bearer token
-  2. partial: only sends `designation` → other columns untouched
+  2. partial: only sends `designation` -> other columns untouched
   3. photo_b64 happy path (200 + data URL + 128-d encoding + match round-trip)
-  4. file:// photo → 422 with "Local file URIs are not allowed"
-  5. black photo_b64 → 422 (quality gate)
-  6. project_id="<pid>" → single Allocation row + status=Active
-  7. project_id=""      → all allocations removed + status="No Allocation"
-  8. no photo fields     → row updated, photo/face_encoding untouched
+  4. file:// photo -> 422 with "Local file URIs are not allowed"
+  5. black photo_b64 -> 422 (quality gate)
+  6. project_id="<pid>" -> single Allocation row + status=Active,
+     project_id=""      -> all allocations removed + status="No Allocation"
+  7. no photo fields    -> row updated, photo/face_encoding untouched
+  8. openapi: both PATCH and PUT are registered on /employees/{emp_id}
   9. DELETE with children (attendance/salary/allocation) succeeds; children gone.
 """
 from __future__ import annotations
@@ -44,6 +49,9 @@ from server import (  # noqa: E402
 )
 
 BASE_URL = os.environ["EXPO_PUBLIC_BACKEND_URL"].rstrip("/") + "/api"
+
+# Methods under test — the stacked-decorator pattern MUST expose both.
+HTTP_METHODS = ["PATCH", "PUT"]
 
 
 # ---------- fixtures ----------
@@ -80,7 +88,7 @@ def headers(token) -> dict:
 
 @pytest.fixture(scope="module")
 def face_b64() -> str:
-    """Known-good face photo → passes the enrolment quality gate."""
+    """Known-good face photo -> passes the enrolment quality gate."""
     url = (
         "https://images.unsplash.com/photo-1646227655685-a530813759b3?"
         "crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTJ8MHwxfHNlYXJjaHwzfHx3"
@@ -152,23 +160,54 @@ def _cleanup_project(name):
         db.commit()
 
 
+def _do_update(method: str, url: str, headers=None, json_body=None, timeout=30):
+    """Thin wrapper that dispatches to requests.patch/put based on `method`."""
+    m = method.upper()
+    fn = requests.patch if m == "PATCH" else requests.put
+    kwargs = {"timeout": timeout}
+    if headers is not None:
+        kwargs["headers"] = headers
+    if json_body is not None:
+        kwargs["json"] = json_body
+    return fn(url, **kwargs)
+
+
+# ---------- 0. openapi spec exposes both verbs ----------
+class TestOpenapiExposesBothVerbs:
+    def test_both_patch_and_put_registered_on_employee_id(self):
+        # `/openapi.json` is only reachable via the internal backend port —
+        # the ingress only proxies `/api/*` to FastAPI.
+        r = requests.get("http://localhost:8001/openapi.json", timeout=15)
+        assert r.status_code == 200, r.text
+        spec = r.json()
+        path = spec["paths"].get("/api/employees/{emp_id}")
+        assert path, "path /api/employees/{emp_id} missing in openapi"
+        assert "patch" in path, "PATCH verb missing on /api/employees/{emp_id}"
+        assert "put" in path, "PUT verb missing on /api/employees/{emp_id}"
+
+
 # ---------- 1. auth ----------
 class TestUpdateEmployeeAuth:
-    def test_patch_requires_bearer(self):
-        code = f"TEST-U-401-{datetime.now().strftime('%H%M%S')}"
-        # we can PATCH a random id — auth should reject before lookup
-        r = requests.patch(
+    @pytest.mark.parametrize("method", HTTP_METHODS)
+    def test_update_requires_bearer(self, method):
+        r = _do_update(
+            method,
             f"{BASE_URL}/employees/does-not-matter",
-            json={"designation": "x"},
+            json_body={"designation": "x"},
             timeout=15,
         )
-        assert r.status_code == 401, f"expected 401, got {r.status_code}: {r.text}"
+        assert r.status_code == 401, (
+            f"[{method}] expected 401, got {r.status_code}: {r.text}"
+        )
 
 
 # ---------- 2. partial update touches only supplied columns ----------
 class TestPartialUpdate:
-    def test_patch_only_designation_leaves_other_fields_alone(self, headers):
-        code = f"TEST-U-PART-{datetime.now().strftime('%H%M%S')}"
+    @pytest.mark.parametrize("method", HTTP_METHODS)
+    def test_update_only_designation_leaves_other_fields_alone(
+        self, method, headers
+    ):
+        code = f"TEST-U-PART-{method}-{datetime.now().strftime('%H%M%S%f')}"
         emp_id = _create_employee(
             headers,
             code,
@@ -180,16 +219,15 @@ class TestPartialUpdate:
             },
         )
         try:
-            r = requests.patch(
+            r = _do_update(
+                method,
                 f"{BASE_URL}/employees/{emp_id}",
                 headers=headers,
-                json={"designation": "Senior Foreman"},
-                timeout=30,
+                json_body={"designation": "Senior Foreman"},
             )
-            assert r.status_code == 200, r.text
+            assert r.status_code == 200, f"[{method}] {r.text}"
             body = r.json()
             assert body["designation"] == "Senior Foreman"
-            # other fields untouched
             with SessionLocal() as db:
                 emp = db.get(Employee, emp_id)
                 assert emp.name == "Original Name"
@@ -203,26 +241,30 @@ class TestPartialUpdate:
 
 # ---------- 3. photo_b64 happy path ----------
 class TestPhotoB64HappyPath:
-    def test_patch_with_photo_b64_stores_data_url_and_encoding(
-        self, headers, face_b64
+    @pytest.mark.parametrize("method", HTTP_METHODS)
+    def test_update_with_photo_b64_stores_data_url_and_encoding(
+        self, method, headers, face_b64
     ):
-        code = f"TEST-U-PHOTO-{datetime.now().strftime('%H%M%S')}"
+        code = f"TEST-U-PHOTO-{method}-{datetime.now().strftime('%H%M%S%f')}"
         emp_id = _create_employee(headers, code)
         try:
-            r = requests.patch(
+            r = _do_update(
+                method,
                 f"{BASE_URL}/employees/{emp_id}",
                 headers=headers,
-                json={"photo_b64": face_b64},
+                json_body={"photo_b64": face_b64},
                 timeout=60,
             )
-            assert r.status_code == 200, r.text
+            assert r.status_code == 200, f"[{method}] {r.text}"
             body = r.json()
             assert body["photo"].startswith("data:image/jpeg;base64,")
 
             with SessionLocal() as db:
                 emp = db.get(Employee, emp_id)
                 assert emp.photo.startswith("data:image/jpeg;base64,")
-                assert emp.face_encoding, "face_encoding NULL after PATCH"
+                assert emp.face_encoding, (
+                    f"[{method}] face_encoding NULL after update"
+                )
                 enc = json.loads(emp.face_encoding)
                 assert isinstance(enc, list) and len(enc) == 128
                 assert all(isinstance(x, (int, float)) for x in enc)
@@ -242,7 +284,7 @@ class TestPhotoB64HappyPath:
             mb = m.json()
             assert mb["matched"] is True
             assert mb["distance"] is not None and mb["distance"] < 0.1, (
-                f"expected distance ~0, got {mb['distance']}"
+                f"[{method}] expected distance ~0, got {mb['distance']}"
             )
         finally:
             _cleanup(code)
@@ -250,14 +292,16 @@ class TestPhotoB64HappyPath:
 
 # ---------- 4. file:// rejected ----------
 class TestFileUriRejected:
-    def test_patch_with_file_uri_returns_422(self, headers):
-        code = f"TEST-U-FILE-{datetime.now().strftime('%H%M%S')}"
+    @pytest.mark.parametrize("method", HTTP_METHODS)
+    def test_update_with_file_uri_returns_422(self, method, headers):
+        code = f"TEST-U-FILE-{method}-{datetime.now().strftime('%H%M%S%f')}"
         emp_id = _create_employee(headers, code)
         try:
-            r = requests.patch(
+            r = _do_update(
+                method,
                 f"{BASE_URL}/employees/{emp_id}",
                 headers=headers,
-                json={
+                json_body={
                     "photo": (
                         "file:///data/user/0/host.exp.exponent/cache/"
                         "Camera/abc.jpg"
@@ -265,37 +309,42 @@ class TestFileUriRejected:
                 },
                 timeout=15,
             )
-            assert r.status_code == 422, r.text
+            assert r.status_code == 422, f"[{method}] {r.text}"
             detail = r.json().get("detail", "")
             assert detail.startswith("Local file URIs are not allowed"), detail
-            # DB photo must be unchanged
             with SessionLocal() as db:
                 emp = db.get(Employee, emp_id)
-                assert emp.photo in (None, ""), f"photo leaked: {emp.photo!r}"
+                assert emp.photo in (None, ""), (
+                    f"[{method}] photo leaked: {emp.photo!r}"
+                )
         finally:
             _cleanup(code)
 
 
 # ---------- 5. black image rejected by quality gate ----------
 class TestBlackImageRejected:
-    def test_patch_black_photo_b64_returns_422(self, headers, black_image_b64):
-        code = f"TEST-U-BLACK-{datetime.now().strftime('%H%M%S')}"
+    @pytest.mark.parametrize("method", HTTP_METHODS)
+    def test_update_black_photo_b64_returns_422(
+        self, method, headers, black_image_b64
+    ):
+        code = f"TEST-U-BLACK-{method}-{datetime.now().strftime('%H%M%S%f')}"
         emp_id = _create_employee(headers, code)
         try:
-            r = requests.patch(
+            r = _do_update(
+                method,
                 f"{BASE_URL}/employees/{emp_id}",
                 headers=headers,
-                json={"photo_b64": black_image_b64},
+                json_body={"photo_b64": black_image_b64},
                 timeout=30,
             )
-            assert r.status_code == 422, r.text
+            assert r.status_code == 422, f"[{method}] {r.text}"
             with SessionLocal() as db:
                 emp = db.get(Employee, emp_id)
                 assert emp.photo in (None, ""), (
-                    f"photo leaked despite quality-gate 422: {emp.photo!r}"
+                    f"[{method}] photo leaked despite 422: {emp.photo!r}"
                 )
                 assert emp.face_encoding in (None, ""), (
-                    "face_encoding leaked despite quality-gate 422"
+                    f"[{method}] face_encoding leaked despite 422"
                 )
         finally:
             _cleanup(code)
@@ -305,7 +354,7 @@ class TestBlackImageRejected:
 class TestProjectAllocation:
     @pytest.fixture(scope="class")
     def project_a(self):
-        name = f"TEST-PROJ-A-{datetime.now().strftime('%H%M%S')}"
+        name = f"TEST-PROJ-A-{datetime.now().strftime('%H%M%S%f')}"
         with SessionLocal() as db:
             p = Project(name=name, status="Active", location="test")
             db.add(p)
@@ -316,7 +365,7 @@ class TestProjectAllocation:
 
     @pytest.fixture(scope="class")
     def project_b(self):
-        name = f"TEST-PROJ-B-{datetime.now().strftime('%H%M%S')}"
+        name = f"TEST-PROJ-B-{datetime.now().strftime('%H%M%S%f')}"
         with SessionLocal() as db:
             p = Project(name=name, status="Active", location="test")
             db.add(p)
@@ -325,20 +374,20 @@ class TestProjectAllocation:
         yield pid
         _cleanup_project(name)
 
+    @pytest.mark.parametrize("method", HTTP_METHODS)
     def test_setting_project_id_creates_single_allocation_and_replaces_prior(
-        self, headers, project_a, project_b
+        self, method, headers, project_a, project_b
     ):
-        code = f"TEST-U-ALLOC-{datetime.now().strftime('%H%M%S')}"
+        code = f"TEST-U-ALLOC-{method}-{datetime.now().strftime('%H%M%S%f')}"
         emp_id = _create_employee(headers, code)
         try:
-            # First allocate to A
-            r1 = requests.patch(
+            r1 = _do_update(
+                method,
                 f"{BASE_URL}/employees/{emp_id}",
                 headers=headers,
-                json={"project_id": project_a},
-                timeout=30,
+                json_body={"project_id": project_a},
             )
-            assert r1.status_code == 200, r1.text
+            assert r1.status_code == 200, f"[{method}] {r1.text}"
             assert r1.json()["status"] == "Active"
             with SessionLocal() as db:
                 allocs = (
@@ -349,14 +398,13 @@ class TestProjectAllocation:
                 assert len(allocs) == 1
                 assert allocs[0].project_id == project_a
 
-            # Reallocate to B — prior A allocation must be removed
-            r2 = requests.patch(
+            r2 = _do_update(
+                method,
                 f"{BASE_URL}/employees/{emp_id}",
                 headers=headers,
-                json={"project_id": project_b},
-                timeout=30,
+                json_body={"project_id": project_b},
             )
-            assert r2.status_code == 200, r2.text
+            assert r2.status_code == 200, f"[{method}] {r2.text}"
             assert r2.json()["status"] == "Active"
             with SessionLocal() as db:
                 allocs = (
@@ -364,34 +412,31 @@ class TestProjectAllocation:
                     .filter(Allocation.employee_id == emp_id)
                     .all()
                 )
-                assert len(allocs) == 1, (
-                    f"expected exactly 1 allocation, got {len(allocs)}"
-                )
+                assert len(allocs) == 1
                 assert allocs[0].project_id == project_b
         finally:
             _cleanup(code)
 
+    @pytest.mark.parametrize("method", HTTP_METHODS)
     def test_empty_project_id_removes_all_allocations(
-        self, headers, project_a
+        self, method, headers, project_a
     ):
-        code = f"TEST-U-UNALLOC-{datetime.now().strftime('%H%M%S')}"
+        code = f"TEST-U-UNALLOC-{method}-{datetime.now().strftime('%H%M%S%f')}"
         emp_id = _create_employee(headers, code)
         try:
-            # allocate
-            requests.patch(
+            _do_update(
+                method,
                 f"{BASE_URL}/employees/{emp_id}",
                 headers=headers,
-                json={"project_id": project_a},
-                timeout=30,
+                json_body={"project_id": project_a},
             )
-            # then unallocate with empty string
-            r = requests.patch(
+            r = _do_update(
+                method,
                 f"{BASE_URL}/employees/{emp_id}",
                 headers=headers,
-                json={"project_id": ""},
-                timeout=30,
+                json_body={"project_id": ""},
             )
-            assert r.status_code == 200, r.text
+            assert r.status_code == 200, f"[{method}] {r.text}"
             assert r.json()["status"] == "No Allocation"
             with SessionLocal() as db:
                 allocs = (
@@ -399,9 +444,7 @@ class TestProjectAllocation:
                     .filter(Allocation.employee_id == emp_id)
                     .all()
                 )
-                assert allocs == [], (
-                    f"allocations not cleared: {[a.project_id for a in allocs]}"
-                )
+                assert allocs == []
                 emp = db.get(Employee, emp_id)
                 assert emp.status == "No Allocation"
         finally:
@@ -410,40 +453,40 @@ class TestProjectAllocation:
 
 # ---------- 7. no photo fields ----------
 class TestNoPhotoUpdate:
-    def test_patch_without_photo_fields_leaves_photo_and_encoding_alone(
-        self, headers, face_b64
+    @pytest.mark.parametrize("method", HTTP_METHODS)
+    def test_update_without_photo_fields_leaves_photo_and_encoding_alone(
+        self, method, headers, face_b64
     ):
-        code = f"TEST-U-NOPHOTO-{datetime.now().strftime('%H%M%S')}"
+        code = f"TEST-U-NOPHOTO-{method}-{datetime.now().strftime('%H%M%S%f')}"
         emp_id = _create_employee(headers, code)
         try:
-            # first set a real photo so we have something to preserve
-            r0 = requests.patch(
+            r0 = _do_update(
+                method,
                 f"{BASE_URL}/employees/{emp_id}",
                 headers=headers,
-                json={"photo_b64": face_b64},
+                json_body={"photo_b64": face_b64},
                 timeout=60,
             )
-            assert r0.status_code == 200, r0.text
+            assert r0.status_code == 200, f"[{method}] {r0.text}"
             with SessionLocal() as db:
                 emp = db.get(Employee, emp_id)
                 original_photo = emp.photo
                 original_encoding = emp.face_encoding
                 assert original_photo and original_encoding
 
-            # now patch without any photo field
-            r = requests.patch(
+            r = _do_update(
+                method,
                 f"{BASE_URL}/employees/{emp_id}",
                 headers=headers,
-                json={"designation": "Foreman"},
-                timeout=30,
+                json_body={"designation": "Foreman"},
             )
-            assert r.status_code == 200, r.text
+            assert r.status_code == 200, f"[{method}] {r.text}"
             with SessionLocal() as db:
                 emp = db.get(Employee, emp_id)
                 assert emp.designation == "Foreman"
-                assert emp.photo == original_photo, "photo mutated"
+                assert emp.photo == original_photo, f"[{method}] photo mutated"
                 assert emp.face_encoding == original_encoding, (
-                    "face_encoding mutated"
+                    f"[{method}] face_encoding mutated"
                 )
         finally:
             _cleanup(code)
@@ -451,15 +494,12 @@ class TestNoPhotoUpdate:
 
 # ---------- 8. DELETE with children ----------
 class TestDeleteCascade:
-    def test_delete_removes_attendance_salary_allocations(
-        self, headers
-    ):
-        code = f"TEST-U-DEL-{datetime.now().strftime('%H%M%S')}"
+    def test_delete_removes_attendance_salary_allocations(self, headers):
+        code = f"TEST-U-DEL-{datetime.now().strftime('%H%M%S%f')}"
         emp_id = _create_employee(headers, code)
-        proj_name = f"TEST-PROJ-DEL-{datetime.now().strftime('%H%M%S')}"
+        proj_name = f"TEST-PROJ-DEL-{datetime.now().strftime('%H%M%S%f')}"
         proj_id = None
         try:
-            # seed a project + allocate
             with SessionLocal() as db:
                 p = Project(name=proj_name, status="Active", location="t")
                 db.add(p)
@@ -501,19 +541,19 @@ class TestDeleteCascade:
                     .filter(AttendanceRecord.employee_id == emp_id)
                     .count()
                     == 0
-                ), "attendance not cleaned up"
+                )
                 assert (
                     db.query(SalaryRecord)
                     .filter(SalaryRecord.employee_id == emp_id)
                     .count()
                     == 0
-                ), "salary not cleaned up"
+                )
                 assert (
                     db.query(Allocation)
                     .filter(Allocation.employee_id == emp_id)
                     .count()
                     == 0
-                ), "allocations not cleaned up"
+                )
         finally:
             _cleanup(code)
             _cleanup_project(proj_name)

@@ -234,8 +234,11 @@ export const api = {
     }),
   getEmployee: (id: string) => request<Employee>(`/employees/${id}`),
   updateEmployee: (id: string, payload: Partial<EmployeeInput>) =>
+    // Use PUT (not PATCH) because some reverse proxies / ingress controllers
+    // strip the PATCH verb. Backend registers this handler on both PATCH
+    // and PUT so either method works.
     request<Employee>(`/employees/${id}`, {
-      method: "PATCH",
+      method: "PUT",
       body: JSON.stringify(payload),
     }),
   deleteEmployee: (id: string) =>

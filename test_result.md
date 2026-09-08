@@ -523,6 +523,36 @@ agent_communication:
          display the existing values.
       3) In Edit mode, submitting WITHOUT re-capturing the photo must
          send `photo` (existing data URL/http URL) and NOT `photo_b64` —
+
+  - agent: "main"
+    message: >
+      Bug fix — user reported "Edit Employee returns 405 Method Not Allowed".
+      Root cause: some reverse proxies / ingress controllers strip the
+      PATCH verb from the request, so the backend never sees the incoming
+      call even though its `@api.patch("/employees/{emp_id}")` route exists.
+
+      FIX:
+      - BACKEND (`server.py`): registered the same `update_employee`
+        handler as BOTH `@api.patch("/employees/{emp_id}")` AND
+        `@api.put("/employees/{emp_id}")`. openapi.json now advertises
+        `patch`, `put`, `get`, `delete` on that path.
+      - FRONTEND (`src/lib/api.ts`): `api.updateEmployee` now uses HTTP
+        `PUT` (universally accepted by proxies) instead of `PATCH`. Body
+        semantics unchanged — partial update; only present fields are
+        written.
+
+      Please verify:
+      1) `PUT /api/employees/{id}` with a partial body performs the same
+         update as PATCH did previously (only the fields sent are
+         changed).
+      2) `PATCH /api/employees/{id}` still works — must return the same
+         result as PUT for API-client backwards compatibility.
+      3) The 5 update-employee tests must still pass — extend them so
+         each one is parametrized on the HTTP method (PATCH and PUT), OR
+         add a new dedicated test that repeats one representative
+         scenario with PUT.
+      4) All other backend tests (~50) must still pass — no regression.
+
          backend should update the row without re-computing the encoding.
       4) In Edit mode, tapping the trash icon shows an Alert; on confirm,
          `DELETE /api/employees/{id}` fires and returns to the list.

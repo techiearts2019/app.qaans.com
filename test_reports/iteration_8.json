@@ -1,0 +1,36 @@
+{
+  "summary": "Verified user-reported 405 fix for Edit Employee. Backend now exposes BOTH PUT and PATCH on /api/employees/{emp_id} via the stacked-decorator pattern (server.py:976-977 `@api.patch(...)` above `@api.put(...)` — officially supported by FastAPI; two distinct route entries confirmed in openapi.json). Frontend `src/lib/api.ts:updateEmployee` now sends `method: 'PUT'` (line 241) with a comment above the call documenting why PUT is preferred (proxies stripping PATCH). Extended `test_update_employee.py` to parametrize every update scenario over BOTH methods using `@pytest.mark.parametrize('method', ['PATCH','PUT'])` PLUS a new `TestOpenapiExposesBothVerbs` case that fetches http://localhost:8001/openapi.json and asserts `paths['/api/employees/{emp_id}']` contains both `patch` and `put`. Full pytest run of the updated file: 18/18 PASSED in 208s (9 update scenarios × 2 methods + 1 openapi + 1 delete). Regression on the other 3 employee/attendance test modules: 16/16 PASSED. Total 34/34 green. Verified scenarios (both PUT and PATCH): (a) 401 without Bearer, (b) partial update touches only supplied cols, (c) photo_b64 → data URL + 128-d encoding + end-to-end /attendance/match distance < 0.1, (d) `photo` starting with `file:` → 422 with friendly detail, (e) black image → 422 via quality gate (no photo/encoding leak), (f) project_id=<pid> creates single Allocation + status='Active' and replaces prior on reallocation, (g) project_id='' clears allocations + status='No Allocation', (h) no-photo-field update leaves photo/face_encoding untouched. DELETE cascade also verified.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_update_employee.py",
+    "/app/test_reports/pytest/iter8_update_employee.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:976-977 stacked decorators `@api.patch(...)` above `@api.put(...)` on the same `update_employee` function is the FastAPI-supported pattern for exposing one handler on two verbs. Verified in openapi.json: both `patch` and `put` operations exist on `/api/employees/{emp_id}`, each with the EmployeeUpdate request body schema.",
+    "server.py:944-973 `EmployeeUpdate` schema has every field Optional[...] with default None so partial payloads are accepted regardless of method.",
+    "server.py:1019-1043 update body correctly uses `payload.model_dump(exclude={'project_id','photo_b64','photo'}, exclude_none=True)` so only fields explicitly present are written; `project_id is not None` gates the allocation branch so PATCH/PUT semantics stay identical whether the client omits or passes explicit values.",
+    "frontend/src/lib/api.ts:236-243 `api.updateEmployee` correctly uses `method: 'PUT'` and includes the required comment documenting proxy compatibility. Body serialization unchanged; only the HTTP verb was swapped."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_update_employee.py — parametrized every update-employee scenario over PATCH and PUT (9 scenarios × 2 methods = 18 tests) via `@pytest.mark.parametrize('method', ['PATCH','PUT'])` and added TestOpenapiExposesBothVerbs. Introduced `_do_update(method,...)` helper that dispatches to requests.patch/put based on method."
+  ],
+  "success_rate": {
+    "backend": "100% (18/18 update-employee tests: 9 scenarios × 2 methods + openapi + delete; plus 16/16 regression on create_employee_photo/employee_out_schema/timezone modules = 34/34 overall)",
+    "frontend": "N/A — code review only. Static verification confirmed `api.updateEmployee` uses PUT with the documented rationale; no functional UI change required."
+  },
+  "seed_data_creation": "All test rows prefixed TEST-U-* and cleaned up in each test's finally block. No permanent seed data added.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The FastAPI stacked-decorator pattern (`@api.patch` above `@api.put`) is validated end-to-end. If a future proxy issue re-appears, run just `pytest backend/tests/test_update_employee.py::TestOpenapiExposesBothVerbs -v` (0.5s) to confirm both verbs are still registered. For the full 18-case matrix expect ~3.5min due to the two photo_b64 happy-path runs (each does a face-encode + /attendance/match round-trip).",
+  "rca_of_issue": "USER-REPORTED BUG: Deployed reverse proxy stripped/refused PATCH requests → Edit Employee failed with 405 Method Not Allowed. FIX APPLIED BY MAIN AGENT: (1) Backend `server.py:977` added `@api.put('/employees/{emp_id}')` above the existing `@api.patch('/employees/{emp_id}')` on the same handler `update_employee(...)` — FastAPI treats stacked decorators as two independent route entries so both verbs go through EmployeeUpdate → identical body handling, quality gates, allocation semantics. (2) Frontend `src/lib/api.ts:236-243` switched `updateEmployee` from PATCH → PUT with a comment documenting proxy compat, so the deployed client no longer emits PATCH at all. Both API-client compatibility (existing external integrations sending PATCH) and proxy compatibility (new deployments) are preserved. VERIFIED: openapi.json exposes both verbs; 9 update scenarios × 2 methods all pass end-to-end (auth, partial, photo_b64→encoding, file:// rejection, quality gate, project (re)allocation, unallocation, no-photo-preservation) and DELETE cascade regression still passes."
+}
