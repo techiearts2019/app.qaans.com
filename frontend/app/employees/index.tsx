@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
@@ -15,6 +14,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { Avatar } from "@/src/components/Avatar";
 import { api, Employee, EmployeeStatus } from "@/src/lib/api";
 import { colors, radius } from "@/src/theme/colors";
 
@@ -213,7 +213,7 @@ function EmpCard({ emp }: { emp: Employee }) {
       style={styles.card}
       testID={`employee-card-${emp.id}`}
     >
-      <Image source={{ uri: emp.photo ?? undefined }} style={styles.avatar} />
+      <Avatar photo={emp.photo} name={emp.name} size={52} />
       <View style={{ flex: 1 }}>
         <Text style={styles.name}>{emp.name}</Text>
         <View style={styles.metaRow}>

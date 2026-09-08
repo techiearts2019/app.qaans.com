@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
@@ -15,6 +14,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { api, SalaryRow } from "@/src/lib/api";
 import { colors, radius } from "@/src/theme/colors";
+import { Avatar } from "@/src/components/Avatar";
 
 const MONTHS = ["Oct 25", "Nov 25", "Dec 25", "Jan 26", "Feb 26"];
 
@@ -166,7 +166,7 @@ export default function SalaryRecords() {
             return (
               <View key={r.id} style={styles.card}>
                 <View style={styles.cardTop}>
-                  <Image source={{ uri: r.photo ?? undefined }} style={styles.avatar} />
+                  <Avatar photo={r.photo} name={r.name} size={44} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.empName}>{r.employee_name}</Text>
                     <Text style={styles.empCode}>{r.employee_code}</Text>

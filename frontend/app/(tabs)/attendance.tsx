@@ -1,6 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { Image } from "expo-image";
 import * as ImageManipulator from "expo-image-manipulator";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Speech from "expo-speech";
@@ -21,6 +20,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { PrimaryButton } from "@/src/components/PrimaryButton";
+import { Avatar } from "@/src/components/Avatar";
 import { api, Employee, FaceMatchItem, FaceMatchResult } from "@/src/lib/api";
 import { colors, radius, shadow } from "@/src/theme/colors";
 
@@ -681,9 +681,10 @@ export default function FaceAttendance() {
             </View>
 
             <View style={styles.matchAvatarWrap}>
-              <Image
-                source={{ uri: matched?.photo ?? undefined }}
-                style={styles.matchAvatar}
+              <Avatar
+                photo={matched?.photo}
+                name={matched?.name}
+                size={112}
               />
               <View style={styles.matchTick}>
                 <Ionicons name="checkmark" size={18} color={colors.white} />
@@ -786,9 +787,10 @@ export default function FaceAttendance() {
 
             {enrollEmp ? (
               <View style={styles.enrollSelected}>
-                <Image
-                  source={{ uri: enrollEmp.photo ?? undefined }}
-                  style={styles.enrollAvatar}
+                <Avatar
+                  photo={enrollEmp.photo}
+                  name={enrollEmp.name}
+                  size={48}
                 />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.enrollName}>{enrollEmp.name}</Text>
@@ -817,10 +819,7 @@ export default function FaceAttendance() {
                     onPress={() => setEnrollEmp(item)}
                     style={styles.enrollRow}
                   >
-                    <Image
-                      source={{ uri: item.photo ?? undefined }}
-                      style={styles.enrollAvatarSm}
-                    />
+                    <Avatar photo={item.photo} name={item.name} size={40} />
                     <View style={{ flex: 1 }}>
                       <Text style={styles.enrollName}>{item.name}</Text>
                       <Text style={styles.enrollMeta}>

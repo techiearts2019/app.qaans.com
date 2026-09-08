@@ -325,3 +325,50 @@ agent_communication:
          `save-employee-button` triggers a proper POST when photo is set.
 
       Reference smoke: /tmp/repro_photo_save.py (already re-verified).
+
+
+  - agent: "main"
+    message: >
+      User reported: "please fix employee photo is not showing" (screenshot
+      showed employees list with no visible avatars at all).
+
+      Investigation:
+        - `DHD-2009 Saqib`, `DHD-1005 Saqib Khan`, `QNS-1001 Saqib Khan`
+          all have photo=NULL in MySQL (verified via a Python probe against
+          the live DB).
+        - `<Image source={{ uri: undefined }}>` in expo-image collapses the
+          52×52 avatar to zero-height on some builds, which is why the card
+          looks broken.
+
+      Fix applied:
+
+      NEW COMPONENT `frontend/src/components/Avatar.tsx`:
+        - Renders `<Image>` when photo is http(s):// OR data:image/…;base64,…
+        - Falls back to a coloured circle with the person's initials for
+          null/undefined/empty photos.
+        - Deterministic pastel palette (same name → same colour across screens).
+
+      SCREENS UPDATED (uniformly replaced raw `<Image source={{ uri: emp.photo ?? undefined }}>`):
+        - app/employees/index.tsx  (the list from the user's screenshot)
+        - app/attendance-records.tsx  (2 places)
+        - app/(tabs)/attendance.tsx  (match modal + enrol modal selected + enrol modal list)
+        - app/(tabs)/dashboard.tsx  (recent activity)
+        - app/projects/[id].tsx  (allocated + roster lists)
+        - app/projects/index.tsx  (avatar stack)
+        - app/salary-records.tsx
+
+      BACKEND DIAGNOSTIC (server.py):
+        - Added a `logging.info` line at the top of `create_employee` that
+          reports the photo mode used by the client (`photo_b64`,
+          `photo(data-url)`, `photo(http)`, `photo(file:!!!)`, `photo(other)`,
+          `none`) and the `photo_b64` length. Never logs the photo body.
+
+      Please verify:
+        1) Employees list renders every card with either an image OR the
+           initials placeholder — NO collapsed avatar slots even when the
+           DB has photo=NULL.
+        2) `POST /api/employees` still saves the photo end-to-end
+           (regression check for iter-4 fix — the 5 tests in
+           `test_create_employee_photo.py` must still be green).
+        3) The `Avatar` component correctly distinguishes data URLs, http
+           URLs, and null.

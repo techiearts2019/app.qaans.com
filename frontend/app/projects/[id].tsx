@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
@@ -14,6 +13,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { PrimaryButton } from "@/src/components/PrimaryButton";
+import { Avatar } from "@/src/components/Avatar";
 import { api, Employee, Project, ProjectStatus } from "@/src/lib/api";
 import { colors, radius } from "@/src/theme/colors";
 
@@ -218,7 +218,7 @@ export default function ProjectDetail() {
         ) : (
           allocated.map((e) => (
             <View key={e.id} style={styles.empRow}>
-              <Image source={{ uri: e.photo ?? undefined }} style={styles.empAvatar} />
+              <Avatar photo={e.photo} name={e.name} size={44} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.empName}>{e.name}</Text>
                 <Text style={styles.empCode}>
@@ -284,7 +284,7 @@ export default function ProjectDetail() {
                   onPress={() => allocate(e.id)}
                   style={styles.empRow}
                 >
-                  <Image source={{ uri: e.photo ?? undefined }} style={styles.empAvatar} />
+                  <Avatar photo={e.photo} name={e.name} size={44} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.empName}>{e.name}</Text>
                     <Text style={styles.empCode}>

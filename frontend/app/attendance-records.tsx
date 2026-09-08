@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
@@ -13,6 +12,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { Avatar } from "@/src/components/Avatar";
 import { api, AttendanceEntry, Employee } from "@/src/lib/api";
 import { colors, radius } from "@/src/theme/colors";
 
@@ -211,7 +211,7 @@ export default function AttendanceRecords() {
               STATUS_COLOR["On Time"];
             return (
               <View key={a.id} style={styles.row}>
-                <Image source={{ uri: a.photo ?? undefined }} style={styles.avatar} />
+                <Avatar photo={a.photo} name={a.employee_name} size={44} />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.name}>{a.employee_name}</Text>
                   <Text style={styles.code}>{a.employee_code}</Text>
@@ -242,7 +242,7 @@ export default function AttendanceRecords() {
           })}
           {filteredAbsent.map((e) => (
             <View key={e.id} style={styles.row}>
-              <Image source={{ uri: e.photo ?? undefined }} style={styles.avatar} />
+              <Avatar photo={e.photo} name={e.name} size={44} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.name}>{e.name}</Text>
                 <Text style={styles.code}>{e.code}</Text>

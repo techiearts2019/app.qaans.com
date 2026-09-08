@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
@@ -21,6 +20,7 @@ import {
   ProjectStatus,
 } from "@/src/lib/api";
 import { colors, radius } from "@/src/theme/colors";
+import { Avatar } from "@/src/components/Avatar";
 
 const FILTERS: ("All" | ProjectStatus)[] = [
   "All",
@@ -276,13 +276,16 @@ function ProjectRow({
         <View style={styles.footerRow}>
           <View style={styles.avatarStack}>
             {stackEmps.slice(0, 3).map((e, i) => (
-              <Image
+              <Avatar
                 key={e.id}
-                source={{ uri: e.photo ?? undefined }}
-                style={[
-                  styles.stackAvatar,
-                  { marginLeft: i === 0 ? 0 : -8 },
-                ]}
+                photo={e.photo}
+                name={e.name}
+                size={28}
+                style={{
+                  marginLeft: i === 0 ? 0 : -8,
+                  borderWidth: 2,
+                  borderColor: colors.card,
+                }}
               />
             ))}
             {allocated === 0 ? (

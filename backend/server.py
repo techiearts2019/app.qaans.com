@@ -819,6 +819,26 @@ def list_employees(
 
 @api.post("/employees", response_model=EmployeeOut)
 def create_employee(payload: EmployeeIn):
+    # Diagnostic: log which photo mode the client used. Never log the
+    # photo body itself (would blow up the log).
+    photo_b64_len = len(payload.photo_b64) if payload.photo_b64 else 0
+    photo_kind = "none"
+    if payload.photo_b64:
+        photo_kind = "photo_b64"
+    elif payload.photo:
+        if payload.photo.startswith("data:"):
+            photo_kind = "photo(data-url)"
+        elif payload.photo.startswith("http"):
+            photo_kind = "photo(http)"
+        elif payload.photo.startswith("file:"):
+            photo_kind = "photo(file:!!!)"
+        else:
+            photo_kind = "photo(other)"
+    logging.info(
+        "create_employee: code=%s name=%s photo_kind=%s photo_b64_len=%d",
+        payload.code, payload.name, photo_kind, photo_b64_len,
+    )
+
     # Reject any client that tries to persist a device-local file URI as
     # `photo`. Such URIs (file:///data/user/0/…) are only reachable on the
     # device that captured them, so the backend can never fetch them for

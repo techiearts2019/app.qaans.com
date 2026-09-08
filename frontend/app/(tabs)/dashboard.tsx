@@ -21,6 +21,7 @@ import {
   Employee,
   Supervisor,
 } from "@/src/lib/api";
+import { Avatar } from "@/src/components/Avatar";
 import { colors, radius, shadow } from "@/src/theme/colors";
 
 const FEATURES: {
@@ -265,7 +266,7 @@ export default function Dashboard() {
         <View style={styles.list}>
           {todayAttendance.map((a) => (
             <View key={a.id} style={styles.listItem}>
-              <Image source={{ uri: a.photo }} style={styles.listAvatar} />
+              <Avatar photo={a.photo} name={a.employee_name} size={40} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.listName}>{a.employee_name}</Text>
                 <Text style={styles.listCode}>
