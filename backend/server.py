@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.request import Request, urlopen
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import aiosmtplib
 import face_recognition
@@ -95,6 +96,33 @@ def new_id() -> str:
 def now_utc() -> datetime:
     # naive UTC (matches SQLAlchemy DateTime default)
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+# --------------------------------------------------------------- time zone --
+# All attendance times, dates, and human-readable time strings displayed in
+# the app are in India Standard Time. The DB itself stores UTC (`created_at`
+# columns), but the "HH:MM AM/PM" and ISO date strings surfaced to the
+# frontend are IST-based so employees and supervisors see local times.
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def now_ist() -> datetime:
+    """Timezone-aware `datetime` in Asia/Kolkata (UTC+5:30)."""
+    return datetime.now(IST)
+
+
+def ist_time_str(dt: Optional[datetime] = None) -> str:
+    """Human-readable 12-hour time in IST, e.g. `"08:42 AM"`."""
+    d = (dt or now_ist()).astimezone(IST) if dt else now_ist()
+    return d.strftime("%I:%M %p")
+
+
+def ist_date_str(dt: Optional[datetime] = None) -> str:
+    """ISO date (YYYY-MM-DD) in IST — for the `date` column on attendance
+    so that "today's attendance" queries roll over at IST midnight, not
+    server midnight."""
+    d = (dt or now_ist()).astimezone(IST) if dt else now_ist()
+    return d.strftime("%Y-%m-%d")
 
 
 def _load_image_from_url(url: str) -> Optional[np.ndarray]:
@@ -362,7 +390,7 @@ class AttendanceRecord(Base):
     time = Column(String(40))  # display string "08:42 AM"
     status = Column(String(20))  # On Time / Late / Early Out
     marked_at = Column(DateTime, default=now_utc)
-    day = Column(Date, default=lambda: date.today())
+    day = Column(Date, default=lambda: now_ist().date())
 
 
 class SalaryRecord(Base):
@@ -441,10 +469,24 @@ class EmployeeOut(PydBase):
     code: str
     designation: Optional[str] = None
     skill: Optional[str] = None
+    gender: Optional[str] = None
+    marital_status: Optional[str] = None
+    dob: Optional[str] = None
+    father_name: Optional[str] = None
+    nominee: Optional[str] = None
+    primary_mobile: Optional[str] = None
+    alt_mobile: Optional[str] = None
+    email: Optional[str] = None
+    date_of_joining: Optional[str] = None
+    date_of_exit: Optional[str] = None
+    current_address: Optional[str] = None
+    permanent_address: Optional[str] = None
+    aadhaar: Optional[str] = None
+    pan: Optional[str] = None
+    uan: Optional[str] = None
+    esi: Optional[str] = None
     status: str
     photo: Optional[str] = None
-    primary_mobile: Optional[str] = None
-    email: Optional[str] = None
     project_id: Optional[str] = None
     project_name: Optional[str] = None
 
@@ -759,8 +801,16 @@ def employee_to_out(emp: Employee, db: Session) -> EmployeeOut:
         project_name = proj.name if proj else None
     return EmployeeOut(
         id=emp.id, name=emp.name, name_hi=emp.name_hi, code=emp.code,
-        designation=emp.designation, skill=emp.skill, status=emp.status,
-        photo=emp.photo, primary_mobile=emp.primary_mobile, email=emp.email,
+        designation=emp.designation, skill=emp.skill,
+        gender=emp.gender, marital_status=emp.marital_status, dob=emp.dob,
+        father_name=emp.father_name, nominee=emp.nominee,
+        primary_mobile=emp.primary_mobile, alt_mobile=emp.alt_mobile,
+        email=emp.email,
+        date_of_joining=emp.date_of_joining, date_of_exit=emp.date_of_exit,
+        current_address=emp.current_address,
+        permanent_address=emp.permanent_address,
+        aadhaar=emp.aadhaar, pan=emp.pan, uan=emp.uan, esi=emp.esi,
+        status=emp.status, photo=emp.photo,
         project_id=project_id, project_name=project_name,
     )
 
@@ -891,12 +941,127 @@ def get_employee(emp_id: str):
         return employee_to_out(emp, db)
 
 
+class EmployeeUpdate(BaseModel):
+    """Partial update. Any field left None is left unchanged.
+    `photo_b64` overrides `photo`. When either is set, the server also
+    recomputes and caches the face encoding.
+    """
+    name: Optional[str] = None
+    name_hi: Optional[str] = None
+    code: Optional[str] = None
+    designation: Optional[str] = None
+    skill: Optional[str] = None
+    gender: Optional[str] = None
+    marital_status: Optional[str] = None
+    dob: Optional[str] = None
+    father_name: Optional[str] = None
+    nominee: Optional[str] = None
+    primary_mobile: Optional[str] = None
+    alt_mobile: Optional[str] = None
+    email: Optional[str] = None
+    date_of_joining: Optional[str] = None
+    date_of_exit: Optional[str] = None
+    current_address: Optional[str] = None
+    permanent_address: Optional[str] = None
+    aadhaar: Optional[str] = None
+    pan: Optional[str] = None
+    uan: Optional[str] = None
+    esi: Optional[str] = None
+    status: Optional[str] = None
+    photo: Optional[str] = None
+    photo_b64: Optional[str] = None
+    project_id: Optional[str] = None
+
+
+@api.patch("/employees/{emp_id}", response_model=EmployeeOut)
+def update_employee(emp_id: str, payload: EmployeeUpdate):
+    """Partial-update an existing employee. Only fields present in the
+    payload are written. If `photo_b64` is provided, the photo is stored
+    as a data URL AND the face encoding is recomputed and cached."""
+    photo_b64_len = len(payload.photo_b64) if payload.photo_b64 else 0
+    logging.info(
+        "update_employee: id=%s photo_b64_len=%d", emp_id, photo_b64_len
+    )
+
+    if payload.photo and payload.photo.startswith("file:"):
+        raise HTTPException(
+            422,
+            "Local file URIs are not allowed for photos. Send `photo_b64` "
+            "instead so the backend can store a reachable copy.",
+        )
+
+    new_encoding_json: Optional[str] = None
+    new_photo: Optional[str] = None
+
+    if payload.photo_b64:
+        pil = _decode_b64_pil(payload.photo_b64)
+        if pil is None:
+            raise HTTPException(400, "Could not decode photo_b64")
+        frame = np.array(pil)
+        enc, err = _assess_enrolment(frame, pil)
+        if err is not None or enc is None:
+            raise HTTPException(422, err or "Photo quality check failed")
+        new_encoding_json = json.dumps(enc.tolist())
+        b64 = payload.photo_b64
+        if not b64.startswith("data:"):
+            b64 = f"data:image/jpeg;base64,{b64}"
+        new_photo = b64
+    elif payload.photo is not None:
+        new_photo = payload.photo
+
+    with SessionLocal() as db:
+        emp = db.get(Employee, emp_id)
+        if not emp:
+            raise HTTPException(404, "Employee not found")
+
+        # Apply every provided scalar field (excluding the ones we handle above)
+        scalar_fields = payload.model_dump(
+            exclude={"project_id", "photo_b64", "photo"}, exclude_none=True
+        )
+        for field, value in scalar_fields.items():
+            setattr(emp, field, value)
+
+        if new_photo is not None:
+            emp.photo = new_photo
+        if new_encoding_json is not None:
+            emp.face_encoding = new_encoding_json
+
+        # Project (re)allocation: overwrite the single active allocation
+        if payload.project_id is not None:
+            db.query(Allocation).filter(Allocation.employee_id == emp.id).delete(
+                synchronize_session=False
+            )
+            if payload.project_id:  # non-empty string ⇒ allocate
+                db.add(
+                    Allocation(project_id=payload.project_id, employee_id=emp.id)
+                )
+                emp.status = "Active"
+            else:
+                # explicit empty ⇒ unallocate
+                emp.status = "No Allocation"
+
+        db.commit()
+        db.refresh(emp)
+        return employee_to_out(emp, db)
+
+
 @api.delete("/employees/{emp_id}")
 def delete_employee(emp_id: str):
     with SessionLocal() as db:
         emp = db.get(Employee, emp_id)
         if not emp:
             raise HTTPException(404, "Employee not found")
+        # Manually clear FK-linked rows first so the delete succeeds on
+        # engines that don't cascade automatically.
+        db.query(AttendanceRecord).filter(
+            AttendanceRecord.employee_id == emp.id
+        ).delete(synchronize_session=False)
+        db.query(SalaryRecord).filter(
+            SalaryRecord.employee_id == emp.id
+        ).delete(synchronize_session=False)
+        db.query(Allocation).filter(
+            Allocation.employee_id == emp.id
+        ).delete(synchronize_session=False)
         db.delete(emp)
         db.commit()
         return {"ok": True}
@@ -1029,7 +1194,9 @@ def today_attendance(
     page_size: int = Query(100, ge=1, le=500),
 ):
     with SessionLocal() as db:
-        base = db.query(AttendanceRecord).filter(AttendanceRecord.day == date.today())
+        base = db.query(AttendanceRecord).filter(
+            AttendanceRecord.day == now_ist().date()
+        )
         total = base.count()
         recs = (
             base.order_by(AttendanceRecord.marked_at.desc())
@@ -1064,7 +1231,7 @@ def mark_attendance(payload: AttendanceIn):
         rec = AttendanceRecord(
             employee_id=emp.id,
             type=payload.type,
-            time=payload.time or datetime.now().strftime("%I:%M %p"),
+            time=payload.time or ist_time_str(),
             status=payload.status,
         )
         db.add(rec)
@@ -1155,7 +1322,7 @@ def match_face(payload: FaceMatchIn):
             rec = AttendanceRecord(
                 employee_id=best_emp.id,
                 type=payload.type,
-                time=datetime.now().strftime("%I:%M %p"),
+                time=ist_time_str(),
                 status="On Time",
             )
             db.add(rec)

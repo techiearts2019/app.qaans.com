@@ -14,6 +14,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Avatar } from "@/src/components/Avatar";
 import { api, AttendanceEntry, Employee } from "@/src/lib/api";
+import { todayIstLabel } from "@/src/utils/time";
 import { colors, radius } from "@/src/theme/colors";
 
 const DAYS = ["Today", "Yesterday", "This Week", "This Month"];
@@ -98,13 +99,7 @@ export default function AttendanceRecords() {
         </Pressable>
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Attendance Records</Text>
-          <Text style={styles.subtitle}>
-            {new Date().toLocaleDateString([], {
-              weekday: "long",
-              day: "numeric",
-              month: "long",
-            })}
-          </Text>
+          <Text style={styles.subtitle}>{todayIstLabel()}</Text>
         </View>
         <Pressable
           style={styles.iconBtn}

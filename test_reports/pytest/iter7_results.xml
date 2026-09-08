@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="20" failures="0" skipped="1" tests="50" time="250.511" timestamp="2026-09-08T08:53:57.075226+00:00" hostname="agent-env-bf990382-1303-463d-afa4-e24275c1e61f"><testcase classname="tests.test_create_employee_photo.TestCreateEmployeeWithPhotoB64" name="test_happy_path_stores_data_url_and_face_encoding" time="16.701" /><testcase classname="tests.test_create_employee_photo.TestCreateEmployeeWithPhotoB64" name="test_match_endpoint_finds_employee_created_via_photo_b64" time="10.402" /><testcase classname="tests.test_create_employee_photo.TestFileUriRejected" name="test_file_uri_returns_422" time="2.979" /><testcase classname="tests.test_create_employee_photo.TestNoFaceRejected" name="test_black_image_returns_422" time="2.988" /><testcase classname="tests.test_create_employee_photo.TestNoPhotoFallback" name="test_create_without_any_photo_field" time="6.154" /><testcase classname="tests.test_employee_out_schema.TestPostEmployeeOutSchema" name="test_post_response_has_all_26_keys_and_values" time="9.497" /><testcase classname="tests.test_employee_out_schema.TestGetEmployeeByIdOutSchema" name="test_get_by_id_response_has_all_26_keys_and_values" time="7.658" /><testcase classname="tests.test_employee_out_schema.TestGetEmployeesListOutSchema" name="test_list_row_has_all_26_keys_and_values" time="8.885" /><testcase classname="tests.test_employee_out_schema.TestPatchEmployeeOutSchema" name="test_patch_response_has_all_26_keys_and_reflects_update" time="8.774" /><testcase classname="tests.test_face_attendance.TestEnrollFace" name="test_requires_bearer" time="0.956"><error message="failed on setup with &quot;AssertionError: DHD-1042 not seeded&#10;assert None&quot;">tests/test_face_attendance.py:75: in ramesh_id
+    assert emp, "DHD-1042 not seeded"
+E   AssertionError: DHD-1042 not seeded
+E   assert None</error></testcase><testcase classname="tests.test_face_attendance.TestEnrollFace" name="test_no_face_returns_422" time="4.008"><error message="failed on setup with &quot;AssertionError: DHD-1042 not seeded&#10;assert None&quot;">tests/test_face_attendance.py:75: in ramesh_id
+    assert emp, "DHD-1042 not seeded"
+E   AssertionError: DHD-1042 not seeded
+E   assert None</error></testcase><testcase classname="tests.test_face_attendance.TestEnrollFace" name="test_enroll_then_persist" time="0.000"><error message="failed on setup with &quot;AssertionError: DHD-1042 not seeded&#10;assert None&quot;">tests/test_face_attendance.py:75: in ramesh_id
+    assert emp, "DHD-1042 not seeded"
+E   AssertionError: DHD-1042 not seeded
+E   assert None</error></testcase><testcase classname="tests.test_face_attendance.TestMatchFace" name="test_requires_bearer" time="0.131" /><testcase classname="tests.test_face_attendance.TestMatchFace" name="test_invalid_base64_returns_400" time="1.065" /><testcase classname="tests.test_face_attendance.TestMatchFace" name="test_match_after_enroll" time="0.956"><error message="failed on setup with &quot;AttributeError: 'NoneType' object has no attribute 'photo'&quot;">tests/test_face_attendance.py:84: in ramesh_face_b64
+    url = emp.photo
+          ^^^^^^^^^
+E   AttributeError: 'NoneType' object has no attribute 'photo'</error></testcase><testcase classname="tests.test_face_attendance.TestMatchFace" name="test_match_creates_attendance_record" time="0.000"><error message="failed on setup with &quot;AttributeError: 'NoneType' object has no attribute 'photo'&quot;">tests/test_face_attendance.py:84: in ramesh_face_b64
+    url = emp.photo
+          ^^^^^^^^^
+E   AttributeError: 'NoneType' object has no attribute 'photo'</error></testcase><testcase classname="tests.test_face_box_overlay.TestFaceBoxSingle" name="test_single_face_has_normalized_box" time="4.995"><error message="failed on setup with &quot;AssertionError: DHD-1042 not seeded&#10;assert None&quot;">tests/test_face_box_overlay.py:78: in ramesh_face_img
+    assert emp, "DHD-1042 not seeded"
+E   AssertionError: DHD-1042 not seeded
+E   assert None</error></testcase><testcase classname="tests.test_face_box_overlay.TestFaceBoxSingle" name="test_matched_box_present" time="0.000"><error message="failed on setup with &quot;AssertionError: DHD-1042 not seeded&#10;assert None&quot;">tests/test_face_box_overlay.py:78: in ramesh_face_img
+    assert emp, "DHD-1042 not seeded"
+E   AssertionError: DHD-1042 not seeded
+E   assert None</error></testcase><testcase classname="tests.test_face_box_overlay.TestFaceBoxMulti" name="test_two_faces_both_have_boxes" time="0.000"><error message="failed on setup with &quot;AssertionError: DHD-1042 not seeded&#10;assert None&quot;">tests/test_face_box_overlay.py:78: in ramesh_face_img
+    assert emp, "DHD-1042 not seeded"
+E   AssertionError: DHD-1042 not seeded
+E   assert None</error></testcase><testcase classname="tests.test_face_box_overlay.TestFaceBoxMulti" name="test_unmatched_face_also_carries_box" time="0.000"><error message="failed on setup with &quot;AssertionError: DHD-1042 not seeded&#10;assert None&quot;">tests/test_face_box_overlay.py:78: in ramesh_face_img
+    assert emp, "DHD-1042 not seeded"
+E   AssertionError: DHD-1042 not seeded
+E   assert None</error></testcase><testcase classname="tests.test_face_box_overlay.TestFaceBoxMulti" name="test_boxes_do_not_overlap_horizontally" time="0.000"><error message="failed on setup with &quot;AssertionError: DHD-1042 not seeded&#10;assert None&quot;">tests/test_face_box_overlay.py:78: in ramesh_face_img
+    assert emp, "DHD-1042 not seeded"
+E   AssertionError: DHD-1042 not seeded
+E   assert None</error></testcase><testcase classname="tests.test_face_box_overlay.TestOpenApiSchema" name="test_facebox_and_facematchitem_schema" time="0.003" /><testcase classname="tests.test_face_quality_multi.TestEnrolQualityGate" name="test_dark_image_rejected" time="4.972"><error message="failed on setup with &quot;AssertionError: DHD-1042 not seeded&#10;assert None&quot;">tests/test_face_quality_multi.py:79: in ramesh
+    assert emp, "DHD-1042 not seeded"
+E   AssertionError: DHD-1042 not seeded
+E   assert None</error></testcase><testcase classname="tests.test_face_quality_multi.TestEnrolQualityGate" name="test_overexposed_image_rejected" time="0.000"><error message="failed on setup with &quot;AssertionError: DHD-1042 not seeded&#10;assert None&quot;">tests/test_face_quality_multi.py:79: in ramesh
+    assert emp, "DHD-1042 not seeded"
+E   AssertionError: DHD-1042 not seeded
+E   assert None</error></testcase><testcase classname="tests.test_face_quality_multi.TestEnrolQualityGate" name="test_blurred_image_rejected" time="0.000"><error message="failed on setup with &quot;AssertionError: DHD-1042 not seeded&#10;assert None&quot;">tests/test_face_quality_multi.py:79: in ramesh
+    assert emp, "DHD-1042 not seeded"
+E   AssertionError: DHD-1042 not seeded
+E   assert None</error></testcase><testcase classname="tests.test_face_quality_multi.TestEnrolQualityGate" name="test_two_faces_rejected" time="0.000"><error message="failed on setup with &quot;AssertionError: DHD-1042 not seeded&#10;assert None&quot;">tests/test_face_quality_multi.py:79: in ramesh
+    assert emp, "DHD-1042 not seeded"
+E   AssertionError: DHD-1042 not seeded
+E   assert None</error></testcase><testcase classname="tests.test_face_quality_multi.TestEnrolQualityGate" name="test_face_too_far_rejected" time="0.000"><error message="failed on setup with &quot;AssertionError: DHD-1042 not seeded&#10;assert None&quot;">tests/test_face_quality_multi.py:79: in ramesh
+    assert emp, "DHD-1042 not seeded"
+E   AssertionError: DHD-1042 not seeded
+E   assert None</error></testcase><testcase classname="tests.test_face_quality_multi.TestEnrolQualityGate" name="test_zero_faces_rejected" time="0.000"><error message="failed on setup with &quot;AssertionError: DHD-1042 not seeded&#10;assert None&quot;">tests/test_face_quality_multi.py:79: in ramesh
+    assert emp, "DHD-1042 not seeded"
+E   AssertionError: DHD-1042 not seeded
+E   assert None</error></testcase><testcase classname="tests.test_face_quality_multi.TestEnrolQualityGate" name="test_happy_path_then_match" time="0.000"><error message="failed on setup with &quot;AssertionError: DHD-1042 not seeded&#10;assert None&quot;">tests/test_face_quality_multi.py:79: in ramesh
+    assert emp, "DHD-1042 not seeded"
+E   AssertionError: DHD-1042 not seeded
+E   assert None</error></testcase><testcase classname="tests.test_face_quality_multi.TestMultiFaceMatch" name="test_schema_contains_faces_detected_and_matches" time="0.000"><error message="failed on setup with &quot;AssertionError: DHD-1042 not seeded&#10;assert None&quot;">tests/test_face_quality_multi.py:79: in ramesh
+    assert emp, "DHD-1042 not seeded"
+E   AssertionError: DHD-1042 not seeded
+E   assert None</error></testcase><testcase classname="tests.test_face_quality_multi.TestMultiFaceMatch" name="test_no_face_frame" time="1.159" /><testcase classname="tests.test_face_quality_multi.TestMultiFaceMatch" name="test_same_face_twice_dedupes" time="0.000"><error message="failed on setup with &quot;AssertionError: DHD-1042 not seeded&#10;assert None&quot;">tests/test_face_quality_multi.py:79: in ramesh
+    assert emp, "DHD-1042 not seeded"
+E   AssertionError: DHD-1042 not seeded
+E   assert None</error></testcase><testcase classname="tests.test_face_quality_multi.TestMultiFaceMatch" name="test_two_different_employees" time="0.000"><error message="failed on setup with &quot;AssertionError: DHD-1042 not seeded&#10;assert None&quot;">tests/test_face_quality_multi.py:79: in ramesh
+    assert emp, "DHD-1042 not seeded"
+E   AssertionError: DHD-1042 not seeded
+E   assert None</error></testcase><testcase classname="tests.test_face_quality_multi.TestMultiFaceMatch" name="test_no_match_fallback" time="0.955"><skipped type="pytest.skip" message="DHD-1042 not enrolled">/app/backend/tests/test_face_quality_multi.py:409: DHD-1042 not enrolled</skipped></testcase><testcase classname="tests.test_timezone_attendance.TestIstHelpersTzIndependent" name="test_ist_time_str_matches_kolkata_wallclock_when_process_tz_is_LA" time="0.001" /><testcase classname="tests.test_timezone_attendance.TestIstHelpersTzIndependent" name="test_ist_date_str_matches_kolkata_date" time="0.000" /><testcase classname="tests.test_timezone_attendance.TestIstHelpersTzIndependent" name="test_now_ist_is_tz_aware_kolkata" time="0.000" /><testcase classname="tests.test_timezone_attendance.TestAttendanceMarkWritesIst" name="test_manual_mark_time_matches_ist" time="13.715" /><testcase classname="tests.test_timezone_attendance.TestAttendanceMatchWritesIst" name="test_match_face_records_ist_time" time="11.507" /><testcase classname="tests.test_timezone_attendance.TestTodayFilterUsesIst" name="test_seeded_ist_today_row_appears_in_today" time="13.976" /><testcase classname="tests.test_timezone_attendance.TestAttendanceRecordDayDefaultIsIst" name="test_new_record_default_day_matches_ist_date" time="7.318" /><testcase classname="tests.test_update_employee.TestUpdateEmployeeAuth" name="test_patch_requires_bearer" time="0.165" /><testcase classname="tests.test_update_employee.TestPartialUpdate" name="test_patch_only_designation_leaves_other_fields_alone" time="15.093" /><testcase classname="tests.test_update_employee.TestPhotoB64HappyPath" name="test_patch_with_photo_b64_stores_data_url_and_encoding" time="15.756" /><testcase classname="tests.test_update_employee.TestFileUriRejected" name="test_patch_with_file_uri_returns_422" time="7.300" /><testcase classname="tests.test_update_employee.TestBlackImageRejected" name="test_patch_black_photo_b64_returns_422" time="7.275" /><testcase classname="tests.test_update_employee.TestProjectAllocation" name="test_setting_project_id_creates_single_allocation_and_replaces_prior" time="18.823" /><testcase classname="tests.test_update_employee.TestProjectAllocation" name="test_empty_project_id_removes_all_allocations" time="17.445" /><testcase classname="tests.test_update_employee.TestNoPhotoUpdate" name="test_patch_without_photo_fields_leaves_photo_and_encoding_alone" time="15.489" /><testcase classname="tests.test_update_employee.TestDeleteCascade" name="test_delete_removes_attendance_salary_allocations" time="13.165" /></testsuite></testsuites>

@@ -35,10 +35,24 @@ export type Employee = {
   code: string;
   designation?: string | null;
   skill?: string | null;
+  gender?: string | null;
+  marital_status?: string | null;
+  dob?: string | null;
+  father_name?: string | null;
+  nominee?: string | null;
+  primary_mobile?: string | null;
+  alt_mobile?: string | null;
+  email?: string | null;
+  date_of_joining?: string | null;
+  date_of_exit?: string | null;
+  current_address?: string | null;
+  permanent_address?: string | null;
+  aadhaar?: string | null;
+  pan?: string | null;
+  uan?: string | null;
+  esi?: string | null;
   status: EmployeeStatus;
   photo?: string | null;
-  primary_mobile?: string | null;
-  email?: string | null;
   project_id?: string | null;
   project_name?: string | null;
 };
@@ -219,6 +233,11 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   getEmployee: (id: string) => request<Employee>(`/employees/${id}`),
+  updateEmployee: (id: string, payload: Partial<EmployeeInput>) =>
+    request<Employee>(`/employees/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
   deleteEmployee: (id: string) =>
     request<{ ok: true }>(`/employees/${id}`, { method: "DELETE" }),
 

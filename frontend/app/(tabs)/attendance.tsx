@@ -23,6 +23,7 @@ import { PrimaryButton } from "@/src/components/PrimaryButton";
 import { Avatar } from "@/src/components/Avatar";
 import { api, Employee, FaceMatchItem, FaceMatchResult } from "@/src/lib/api";
 import { colors, radius, shadow } from "@/src/theme/colors";
+import { nowIstTime } from "@/src/utils/time";
 
 type Phase = "idle" | "scanning" | "matched";
 
@@ -730,11 +731,7 @@ export default function FaceAttendance() {
               <View style={styles.timePill}>
                 <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
                 <Text style={styles.timePillText}>
-                  {matchTime ||
-                    new Date().toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
+                  {matchTime || nowIstTime()}
                 </Text>
               </View>
             </View>

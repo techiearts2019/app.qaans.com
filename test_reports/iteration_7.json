@@ -1,0 +1,45 @@
+{
+  "summary": "Iteration-7 verified BOTH fixes: (1) IST attendance timezone fix and (2) previously-flagged EmployeeOut schema (14 missing fields). BACKEND: 50/50 pytest passing overall — 25 face tests + 9 test_update_employee + 5 test_create_employee_photo + 4 NEW test_employee_out_schema (POST/GET-by-id/list/PATCH all return the full 26-key EmployeeOut) + 7 NEW test_timezone_attendance (TZ-independence, manual mark IST, match-face IST, /today IST filter, AttendanceRecord.day default = IST date) + 1 skip. Timezone helpers verified: `ist_time_str()` returns the Kolkata wall-clock even when process TZ=America/Los_Angeles; `now_ist()` is tz-aware UTC+5:30; `AttendanceRecord.day` default is `now_ist().date()`; `POST /api/attendance/mark` and `POST /api/attendance/match` both persist IST wall-clock strings ('HH:MM AM/PM'); `GET /api/attendance/today` filters by IST day (verified by seeding a same-day IST row → appears, and a yesterday-IST row → does NOT appear). EmployeeOut fix verified: POST/GET/{id}/GET list/PATCH all round-trip all 22 writable columns (gender, marital_status, dob, father_name, nominee, alt_mobile, date_of_joining, date_of_exit, current_address, permanent_address, aadhaar, pan, uan, esi, plus the prior 8) — no more blank fields on the Edit form's load. FRONTEND: static-verified — `src/utils/time.ts` exports `nowIstTime/todayIstLabel/todayIstIso`; `nowIstTime(new Date('2026-09-05T00:00:00Z'))` returns exactly '05:30 AM' and `todayIstIso(new Date('2026-09-04T20:00:00Z'))` returns exactly '2026-09-05' (verified via node); `attendance.tsx` match modal fallback uses `nowIstTime()`; `dashboard.tsx` `getGreeting()` uses `timeZone: 'Asia/Kolkata'`; `attendance-records.tsx` header subtitle uses `todayIstLabel()`; grep confirms zero bare `toLocaleTimeString([]` calls anywhere in `/app/frontend/app` or `/app/frontend/src`. Timezone bug is fully resolved.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_timezone_attendance.py",
+    "/app/backend/tests/test_employee_out_schema.py",
+    "/app/backend/tests/test_update_employee.py",
+    "/app/test_reports/pytest/iter7_partial.xml",
+    "/app/test_reports/pytest/iter7_face.xml"
+  ],
+  "action_items": [
+    "OPTIONAL/LOW: The session-scoped autouse fixture `_ensure_test_seed` in `/app/backend/tests/conftest.py` seeded DHD-1042 on empty DB but the row didn't survive between test *files* in the same pytest session on this environment (fail signature: `AssertionError: DHD-1042 not seeded` on every face-test module). Workaround: manually seed DHD-1042 before running the face tests. Root fix: change the conftest fixture to be `scope='function'` (or module-level autouse in each face-test module), or make the teardown re-idempotent so the same seed row remains for parallel modules. Once seeded, all 25 face tests pass.",
+    "OPTIONAL/LOW (carry-over from iter-6): dead cooldown scaffolding at server.py:1290-1293 referencing hasattr(AttendanceRecord,'created_at') — either wire to `marked_at` or delete."
+  ],
+  "critical_code_review_comments": [
+    "server.py:106-125 IST helpers are correct: `IST=ZoneInfo('Asia/Kolkata')`; `now_ist()` returns tz-aware UTC+5:30; `ist_time_str()` and `ist_date_str()` both `.astimezone(IST)` before formatting so the returned string is always Kolkata wall-clock regardless of process TZ.",
+    "server.py:393 `AttendanceRecord.day = Column(Date, default=lambda: now_ist().date())` — the default is a lambda so it fires per-row insert (not once at class-definition time), correctly rolling over at IST midnight.",
+    "server.py:1198 `today_attendance` filters `AttendanceRecord.day == now_ist().date()` — matches IST day.",
+    "server.py:1234, 1325 both `mark_attendance` and `match_face` use `time=ist_time_str()` for the persisted display string — no server-local time leak.",
+    "server.py:465-491 EmployeeOut now exposes all 22 writable columns AND read-only `id/status/photo/project_id/project_name` (26 keys total); `employee_to_out()` at server.py:790-815 populates every one. Round-trip verified end-to-end via 4 new pytests.",
+    "frontend/src/utils/time.ts uses `timeZone: 'Asia/Kolkata'` on all three exports (`en-US` for 12h time, `en-IN` long-form label, `en-CA` for machine ISO). Values match review-request spec exactly.",
+    "frontend/app/(tabs)/dashboard.tsx:317-321 `getGreeting` uses `timeZone: 'Asia/Kolkata'` — supervisors travelling outside India see the correct greeting."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_timezone_attendance.py (new — 7 tests covering IST helpers, manual mark, match, today filter, default day)"
+  ],
+  "success_rate": {
+    "backend": "100% (50/50 pytest; 1 pre-existing skip). Every review-request timezone assertion verified plus the earlier EmployeeOut regression.",
+    "frontend": "100% static verification: `src/utils/time.ts` outputs match the review-request expectations exactly; every consumer (attendance.tsx, dashboard.tsx, attendance-records.tsx) uses the IST helpers; zero bare `toLocaleTimeString` calls remain."
+  },
+  "seed_data_creation": "Re-seeded DHD-1042 (Ramesh Kumar) manually mid-run after discovering the conftest fixture teardown left the DB without it for the face-test module block. All TEST-* rows created by the new suite are cleaned up in their fixture teardown.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Full pytest run: pre-seed `DHD-1042` if missing (see conftest.py seed_data) — the current session-scoped autouse fixture doesn't reliably persist the row across all test modules in one session. Timezone regression suite is at tests/test_timezone_attendance.py. To validate the IST fix quickly: run pytest -k 'test_timezone_attendance or test_employee_out_schema' (11 tests, ~90s).",
+  "rca_of_issue": "USER-REPORTED BUG: attendance was being persisted with `datetime.now().strftime('%I:%M %p')` which reflected server-local time (could be UTC in prod containers or Los_Angeles on the QA box). FIX APPLIED BY MAIN AGENT: added `IST=ZoneInfo('Asia/Kolkata')` + helpers `now_ist()`, `ist_time_str()`, `ist_date_str()`; every write site (`mark_attendance`, `match_face`) and the DB-column default (`AttendanceRecord.day`) now uses these helpers; the `/attendance/today` filter uses `now_ist().date()` so day rolls over at IST midnight. Frontend `src/utils/time.ts` mirrors this so any client-side fallback in the match-modal (`nowIstTime()` in `attendance.tsx`) also uses IST via `toLocaleTimeString('en-US', {timeZone: 'Asia/Kolkata'})`. VERIFIED: all 7 timezone regression tests pass; explicit os.environ['TZ']='America/Los_Angeles' + time.tzset() prior to calling `ist_time_str()` still returns the Kolkata wall-clock (proves TZ independence); manual mark + face-match writes fall within an IST wallclock window; /today returns the IST-today row and excludes the IST-yesterday row. SECONDARY FIX (from iter-6 HIGH bug): EmployeeOut now surfaces all 22 columns via server.py:465-491 + employee_to_out(); 4 new schema tests confirm POST/GET-by-id/GET-list/PATCH all round-trip every field. Edit Employee load now populates gender/marital_status/dob/father_name/nominee/alt_mobile/date_of_joining/date_of_exit/current_address/permanent_address/aadhaar/pan/uan/esi correctly."
+}

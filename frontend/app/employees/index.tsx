@@ -206,12 +206,14 @@ export default function EmployeesList() {
 }
 
 function EmpCard({ emp }: { emp: Employee }) {
+  const router = useRouter();
   const c = STATUS_COLOR[emp.status];
   const projName = emp.project_name;
   return (
     <Pressable
-      style={styles.card}
+      style={({ pressed }) => [styles.card, pressed && { opacity: 0.85 }]}
       testID={`employee-card-${emp.id}`}
+      onPress={() => router.push(`/employees/${emp.id}`)}
     >
       <Avatar photo={emp.photo} name={emp.name} size={52} />
       <View style={{ flex: 1 }}>

@@ -312,7 +312,14 @@ export default function Dashboard() {
 }
 
 function getGreeting() {
-  const h = new Date().getHours();
+  // Greeting anchored to IST regardless of the device's local timezone,
+  // so the UX stays consistent for supervisors travelling outside India.
+  const hourStr = new Date().toLocaleString("en-US", {
+    hour: "numeric",
+    hour12: false,
+    timeZone: "Asia/Kolkata",
+  });
+  const h = parseInt(hourStr, 10);
   if (h < 12) return "Good morning";
   if (h < 17) return "Good afternoon";
   return "Good evening";

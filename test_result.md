@@ -372,3 +372,105 @@ agent_communication:
            `test_create_employee_photo.py` must still be green).
         3) The `Avatar` component correctly distinguishes data URLs, http
            URLs, and null.
+
+
+  - agent: "main"
+    message: >
+      New feature: **Edit Employee** section.
+
+      BACKEND (`server.py`):
+      - New Pydantic model `EmployeeUpdate` — every field optional; supports
+        `photo_b64` + `project_id`.
+      - New endpoint `PATCH /api/employees/{emp_id}`:
+        * Applies every non-None field to the row.
+        * If `photo_b64` present → runs the same quality gate as create/enrol,
+          stores photo as `data:image/jpeg;base64,…` AND recomputes 128-d
+          face encoding.
+        * Rejects any `photo` starting with `file:` (422 friendly detail).
+        * `project_id`: non-empty → overwrites the single active allocation
+          and sets status to "Active"; empty string → un-allocates and sets
+          status to "No Allocation".
+      - `DELETE /api/employees/{emp_id}` now cascade-cleans attendance,
+        salary, allocations before deleting so it no longer fails on FK.
+      - Added `logging.info("update_employee: id=%s photo_b64_len=%d", …)`
+        (same pattern as create — never logs the photo body).
+
+      FRONTEND:
+      - New route `app/employees/[id].tsx` — full edit screen:
+        * Loads employee via `getEmployee(id)` + `listProjects()`.
+        * Same photo-capture flow as Add Employee, but only re-encodes and
+          re-uploads the photo when the user actually captured a new one
+          (`photoDirty` flag). Existing photos come back as data URLs or
+          http(s) URLs — those are round-tripped unchanged.
+        * Photo hint "New photo captured — save to update" appears on
+          re-capture.
+        * Status chips (Active / No Allocation / Inactive).
+        * Project chips including an "Unallocated" pill.
+        * Delete button with `Alert.alert` confirm.
+        * `edit-toast` surfaces success + backend 422 details.
+      - Employees list card (`app/employees/index.tsx:EmpCard`) is now
+        pressable and routes to `/employees/{id}`.
+      - New API client method `api.updateEmployee(id, payload)`.
+
+      Please verify:
+      1) `PATCH /api/employees/{id}` with a small partial body (e.g. only
+         `{ "designation": "Senior Foreman" }`) updates ONLY that field.
+      2) `PATCH /api/employees/{id}` with `photo_b64` updates photo (data
+         URL) AND recomputes face_encoding.
+      3) `PATCH /api/employees/{id}` with `photo: "file:///data/..."` → 422.
+      4) `PATCH /api/employees/{id}` with `project_id: "<valid>"` sets the
+         allocation and status → "Active".
+      5) `PATCH /api/employees/{id}` with `project_id: ""` clears the
+         allocation and status → "No Allocation".
+      6) `DELETE /api/employees/{id}` succeeds even when the employee has
+         attendance/salary/allocation rows.
+      7) Existing 30 pytest tests must still pass — no regression.
+
+      Recommended: add tests for the 5 PATCH scenarios in a new file
+      `tests/test_update_employee.py`.
+
+
+  - agent: "main"
+    message: >
+      Bug fix — timezone consistency. User reported attendance times were
+      saved as server-local (`datetime.now().strftime(...)`) instead of IST.
+
+      BACKEND (`server.py`):
+      - Imported `zoneinfo.ZoneInfo`; added `IST`, `now_ist()`,
+        `ist_time_str()`, `ist_date_str()` helpers.
+      - `POST /api/attendance` fallback time changed from
+        `datetime.now().strftime("%I:%M %p")` to `ist_time_str()`.
+      - `POST /api/attendance/match` write path changed from
+        `datetime.now().strftime("%I:%M %p")` to `ist_time_str()`.
+      - `AttendanceRecord.day` default changed from `date.today()` to
+        `lambda: now_ist().date()` so "today" rolls over at IST midnight.
+      - `GET /api/attendance/today` filter changed from `date.today()` to
+        `now_ist().date()` — supervisors in the US at 8 PM PST see the
+        current IST day.
+
+      FRONTEND:
+      - New `frontend/src/utils/time.ts`:
+        * `nowIstTime()` → `"08:42 AM"` in IST via `toLocaleTimeString`
+          with `timeZone: "Asia/Kolkata"`.
+        * `todayIstLabel()` → `"Fri, 5 Sep 2026"` in IST.
+        * `todayIstIso()` → `"2026-09-05"` in IST.
+      - `app/(tabs)/attendance.tsx`: match-modal fallback time uses
+        `nowIstTime()` (was `new Date().toLocaleTimeString([])`).
+      - `app/(tabs)/dashboard.tsx`: greeting anchored to IST via
+        `Intl.DateTimeFormat(en-US, {hour, hour12:false, timeZone:"Asia/Kolkata"})`.
+      - `app/attendance-records.tsx`: header subtitle now uses
+        `todayIstLabel()`.
+
+      Please verify:
+      1) A `POST /api/attendance` on any host in any TZ writes a `time`
+         string that matches IST wall-clock time.
+      2) A `POST /api/attendance/match` writes a `time` string that
+         matches IST wall-clock time.
+      3) `GET /api/attendance/today` filters by IST day, not server day.
+      4) `AttendanceRecord.day` defaults to IST date on freshly-created
+         rows.
+      5) Backend still has 30/36+ tests green.
+      6) Frontend `time.ts` returns the correct IST string when the
+         device is set to a non-IST timezone (mock via
+         `TZ=America/Los_Angeles` env or `jest.setSystemTime` if
+         applicable).
