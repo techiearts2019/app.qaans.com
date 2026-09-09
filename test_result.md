@@ -558,3 +558,144 @@ agent_communication:
          `DELETE /api/employees/{id}` fires and returns to the list.
       5) All 50 pytest backend tests must still pass — this is a
          frontend-only refactor.
+
+  - agent: "main"
+    message: >
+      Bug fix — "face attendance camera works the first time the app opens,
+      but fails with 'Camera did not return a frame' on subsequent uses".
+
+      Root cause (verified by code inspection):
+      - `cameraReady` state was set to `true` on the first `onCameraReady`
+        callback and never reset. On subsequent focuses the `CameraView`
+        unmounted (because we conditionally render it based on `isFocused`)
+        but the JS `cameraReady` state stayed stale.
+      - Also `busyRef.current` could leak across visits.
+      - When user returned, `useFocusEffect` set `isFocused=true` again and
+        the polling effect saw `cameraReady=true` → immediately fired
+        `takePictureAsync` on a freshly-remounted (not-yet-ready) native
+        camera surface → the promise resolved with no `uri` → user saw
+        "Camera did not return a frame".
+
+      Fix (`app/(tabs)/attendance.tsx`):
+      - Reset `cameraReady=false`, `busyRef.current=false`, `inFlight=false`,
+        `scanError=null`, `boxes=[]`, `facesInFrame=0`, and `phase="scanning"`
+        on every focus (inside `useFocusEffect`).
+      - Increment a new `cameraSession` counter on every focus and use it
+        as the `key={\`cam-${cameraSession}\`}` on the `CameraView`, so
+        the native camera surface is fully torn down and re-initialised
+        each time the screen becomes focused.
+      - Also reset `cameraReady=false` and `busyRef` on the cleanup
+        (blur) side.
+      - Any tick that fails (undefined URI OR thrown exception) also
+        sets `cameraReady=false` to force a wait for the next
+        `onCameraReady` before scanning resumes.
+
+      Please verify:
+      1) Navigate to Attendance, then away, then back, at least 3 times.
+         Camera preview should render and start scanning within ~2 s each
+         time. No "Camera did not return a frame" toast should appear
+         under normal conditions.
+      2) `cameraSession` state increments on every focus (visible via a
+         `testID`-augmented text or a log).
+      3) If the camera really can't produce a frame (e.g. permission
+         denied while backgrounded), the banner appears and the loop
+         gracefully waits for the next `onCameraReady`.
+      4) No backend changes — the 34 backend tests must still pass.
+
+
+  - agent: "main"
+    message: >
+      Feature + bug-fix: "camera should run continuously; pause scanning
+      when no face; auto-resume when face appears; show 'No Employee
+      Found' with audio when face is unknown; 5s pause after any match;
+      also ensure camera reinitialises every screen visit."
+
+      Camera reinitialisation was already fixed in iter-9 (cameraSession
+      key + reset-on-focus). Left as-is.
+
+      NEW BEHAVIOUR (`app/(tabs)/attendance.tsx`):
+      - Phase type widened: `"idle" | "scanning" | "matched" | "unmatched"`.
+      - `MATCH_MODAL_AUTOCLOSE_MS` bumped 3000 → 5000 (per user spec).
+      - New constants:
+          * `UNMATCHED_MODAL_AUTOCLOSE_MS = 5000` — how long "No Employee
+            Found" stays on screen before auto-resume.
+          * `UNMATCHED_COOLDOWN_MS = 15_000` — suppress the same "No
+            Employee Found" flash for 15 s so a stranger standing in
+            frame doesn't spam every tick.
+      - New `unmatchedCooldownRef: useRef<number>(0)` for the client-side
+        cooldown.
+      - Tick handler now branches into 3 cases:
+          1. Some matched employees → existing queued match flow
+             (5 s autoclose, Hindi TTS "…की हाजिरी लग गई है").
+          2. `faces_detected > 0` but zero matches AND cooldown expired
+             → `setPhase("unmatched")`, `Speech.speak("कोई कर्मचारी नहीं मिला",
+             {language:"hi-IN"})`.
+          3. No faces → do nothing, stays in `scanning`.
+      - Status pill now reads:
+          * `"Match found"` when phase=matched
+          * `"Unknown face"` when phase=unmatched
+          * `"Waiting for face"` when facesInFrame=0
+          * `"Scanning…"` otherwise
+      - Auto-dismiss `useEffect` now triggers `resumeScan` after 5 s for
+        BOTH `matched` and `unmatched` phases.
+      - New unmatched modal (fade animation, red badge, "person-remove"
+        icon, English + Hindi headings, Continue Scanning button).
+        testIDs: `unmatched-title`, `close-unmatched-modal`,
+        `continue-scan-unmatched-button`.
+
+      Please verify:
+      1) Point the camera at a face NOT enrolled → the red "No Employee
+         Found" modal appears within ~1.5 s, Hindi audio fires, modal
+         auto-dismisses after 5 s, scanning resumes.
+      2) Point the camera at an enrolled employee → green match modal
+         appears, Hindi audio "…की हाजिरी लग गई है" fires, auto-dismiss
+         after 5 s (NOT 3 s), scanning resumes.
+      3) Remove face from frame → status pill reads "Waiting for face".
+         Re-appear → pill flips to "Scanning…" → then a match/unmatched
+         modal within 1.5 s.
+      4) Standing in front of camera with an unknown face does NOT spam
+         the modal — it only fires again after 15 s cooldown.
+      5) Backend not touched — 59 backend tests still green.
+
+
+  - agent: "main"
+    message: >
+      Feature: auto Check-in / Check-out toggle in face-match.
+
+      BACKEND (`server.py`):
+      - `FaceMatchIn.type` now allows `"Auto"` in addition to
+        `"Check-in"` and `"Check-out"`. `"Auto"` is the new default.
+      - `POST /api/attendance/match`: when `type == "Auto"`, per matched
+        employee we query the most-recent `AttendanceRecord` for that
+        employee for today (IST day). If it was `Check-in`, the new
+        record is `Check-out`; otherwise (Check-out or no record) it is
+        `Check-in`. Response `attendance.type` reflects the resolved
+        type.
+      - When `type` is explicitly `"Check-in"` or `"Check-out"` the
+        legacy behaviour is preserved (server writes it verbatim).
+
+      FRONTEND (`app/(tabs)/attendance.tsx`, `src/lib/api.ts`):
+      - Scan loop now sends `type: "Auto"` unconditionally so the flow
+        is hands-free — the local mode toggle at the bottom is now
+        cosmetic (the backend is authoritative).
+      - `api.matchFace` payload type widened to accept "Auto".
+
+      REGRESSION:
+      - All previously passing suites must continue to pass. The change
+        to `FaceMatchIn.type` is backward-compatible (fixed strings still
+        pass validation and their write behaviour is unchanged).
+
+      Please verify (add tests in a new `test_auto_checkin_checkout.py`):
+      1) Employee with NO attendance today + `type: "Auto"` → written
+         row's `type` is `"Check-in"`.
+      2) Employee with last row `Check-in` today + `type: "Auto"` →
+         written row is `"Check-out"`.
+      3) Employee with last row `Check-out` today + `type: "Auto"` →
+         written row is `"Check-in"` again (cycles).
+      4) Employee whose last record is from a PREVIOUS day + `type:
+         "Auto"` → treated as no record today → `"Check-in"`.
+      5) `type: "Check-in"` explicit still writes `"Check-in"` even if
+         the last record today was already a `Check-in` (legacy verbatim
+         behaviour).
+      6) Response `matches[i].attendance.type` matches the actual DB row.
+

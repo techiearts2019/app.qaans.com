@@ -25,14 +25,18 @@ import { api, Employee, FaceMatchItem, FaceMatchResult } from "@/src/lib/api";
 import { colors, radius, shadow } from "@/src/theme/colors";
 import { nowIstTime } from "@/src/utils/time";
 
-type Phase = "idle" | "scanning" | "matched";
+type Phase = "idle" | "scanning" | "matched" | "unmatched";
 
 // keep the last-detected face boxes on-screen briefly after each match tick
 // so the overlay doesn't flicker between polls.
 const BOX_TTL_MS = 2200;
 
 const MATCH_INTERVAL_MS = 1500;
-const MATCH_MODAL_AUTOCLOSE_MS = 3000;
+const MATCH_MODAL_AUTOCLOSE_MS = 5000;
+const UNMATCHED_MODAL_AUTOCLOSE_MS = 5000;
+// after we've flashed "No Employee Found", suppress it for this long so the
+// same unknown face standing in frame doesn't trigger the modal every tick.
+const UNMATCHED_COOLDOWN_MS = 15_000;
 const PER_EMPLOYEE_COOLDOWN_MS = 60_000;
 
 export default function FaceAttendance() {
@@ -43,6 +47,11 @@ export default function FaceAttendance() {
   const [action, setAction] = useState<"Check-in" | "Check-out">("Check-in");
   const [isFocused, setIsFocused] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
+  // Bump this every time we (re)enter the screen so the CameraView is
+  // fully torn down and re-mounted — the native camera surface must be
+  // reinitialised every focus or `takePictureAsync` returns undefined on
+  // subsequent visits.
+  const [cameraSession, setCameraSession] = useState(0);
   const [scanError, setScanError] = useState<string | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [matched, setMatched] = useState<FaceMatchResult["employee"] | null>(null);
@@ -63,6 +72,8 @@ export default function FaceAttendance() {
   const busyRef = useRef(false);
   // cooldown so the same person doesn't double-punch within 60s
   const cooldownRef = useRef<Map<string, number>>(new Map());
+  // suppress "No Employee Found" spam for UNMATCHED_COOLDOWN_MS after each display
+  const unmatchedCooldownRef = useRef<number>(0);
 
   // animations
   const scanLine = useRef(new Animated.Value(0)).current;
@@ -73,8 +84,22 @@ export default function FaceAttendance() {
   // NOTE: expo-router's useFocusEffect can be flaky on Android release
   // builds for the initial route, so we ALSO force isFocused=true on mount
   // (see the useEffect below). That guarantees polling starts on cold boot.
+  //
+  // CRITICAL: `cameraReady` and `busyRef` MUST be reset every time we
+  // (re)enter the screen. If we leave them stale from the previous visit,
+  // the polling loop will fire `takePictureAsync` before the freshly-
+  // remounted CameraView has actually reported ready → the promise
+  // resolves with no URI → user sees "Camera did not return a frame" on
+  // every subsequent open of the Attendance tab.
   useFocusEffect(
     useCallback(() => {
+      setCameraReady(false);
+      busyRef.current = false;
+      setInFlight(false);
+      setScanError(null);
+      setBoxes([]);
+      setFacesInFrame(0);
+      setCameraSession((s) => s + 1); // force CameraView remount
       setIsFocused(true);
       setPhase("scanning");
       // Reload employees list on focus (in case new ones were added)
@@ -85,6 +110,9 @@ export default function FaceAttendance() {
       return () => {
         setIsFocused(false);
         setPhase("idle");
+        setCameraReady(false);
+        busyRef.current = false;
+        setInFlight(false);
         try {
           Speech.stop();
         } catch {
@@ -182,6 +210,10 @@ export default function FaceAttendance() {
           base64: false,
         });
         if (cancelled || !pic?.uri) {
+          // Camera surface is not actually usable — drop back to
+          // "waiting for ready" so we don't hammer an unresponsive
+          // native camera every 1.5s.
+          setCameraReady(false);
           setScanError("Camera did not return a frame. Retrying…");
           return;
         }
@@ -203,7 +235,9 @@ export default function FaceAttendance() {
 
         const res = await api.matchFace({
           image_b64: small.base64,
-          type: action,
+          // "Auto" makes the server toggle Check-in/Check-out based on the
+          // employee's most-recent attendance row today. Hands-free flow.
+          type: "Auto",
           threshold: 0.6,
         });
         if (cancelled) return;
@@ -219,7 +253,31 @@ export default function FaceAttendance() {
         const successful = (res.matches ?? []).filter(
           (m) => m.matched && m.employee
         );
-        if (successful.length === 0) return;
+        if (successful.length === 0) {
+          // Face(s) were detected but none matched an enrolled employee.
+          // Show a "No Employee Found" flash — but only if a face was
+          // actually in frame (unknown face), and respect a 15s cooldown
+          // so a stranger standing in front of the camera doesn't spam.
+          const facesSeen = res.faces_detected ?? 0;
+          const now = Date.now();
+          if (
+            facesSeen > 0 &&
+            now > unmatchedCooldownRef.current &&
+            phase === "scanning"
+          ) {
+            unmatchedCooldownRef.current = now + UNMATCHED_COOLDOWN_MS;
+            setPhase("unmatched");
+            try {
+              Speech.speak("कोई कर्मचारी नहीं मिला", {
+                language: "hi-IN",
+                rate: 0.95,
+              });
+            } catch {
+              // noop
+            }
+          }
+          return;
+        }
 
         const now = Date.now();
         const fresh: FaceMatchItem[] = [];
@@ -251,6 +309,9 @@ export default function FaceAttendance() {
         const msg = e instanceof Error ? e.message : String(e);
         console.warn("match tick failed", e);
         setScanError(`Scan failed: ${msg.slice(0, 80)}`);
+        // Any unexpected camera / manipulator throw invalidates our
+        // cameraReady assumption — wait for the next onCameraReady tick.
+        setCameraReady(false);
       } finally {
         busyRef.current = false;
         setInFlight(false);
@@ -300,11 +361,16 @@ export default function FaceAttendance() {
     });
   }, []);
 
-  // Auto-dismiss match modal after MATCH_MODAL_AUTOCLOSE_MS so the flow stays hands-free.
-  // Re-arms when `matched` changes (e.g. advancing through a multi-face queue).
+  // Auto-dismiss the matched OR unmatched modal after AUTOCLOSE_MS so the
+  // flow stays hands-free. Re-arms when `matched` changes (e.g. advancing
+  // through a multi-face queue).
   useEffect(() => {
-    if (phase !== "matched") return;
-    const t = setTimeout(resumeScan, MATCH_MODAL_AUTOCLOSE_MS);
+    if (phase !== "matched" && phase !== "unmatched") return;
+    const delay =
+      phase === "matched"
+        ? MATCH_MODAL_AUTOCLOSE_MS
+        : UNMATCHED_MODAL_AUTOCLOSE_MS;
+    const t = setTimeout(resumeScan, delay);
     return () => clearTimeout(t);
   }, [phase, matched, resumeScan]);
 
@@ -428,6 +494,10 @@ export default function FaceAttendance() {
       <StatusBar style="light" />
       {isFocused ? (
         <CameraView
+          // key forces the native camera surface to fully tear down + re-init
+          // whenever we (re)enter the screen. Without this, a stale native
+          // session can leak the "not-ready" state into the next visit.
+          key={`cam-${cameraSession}`}
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
           facing={facing}
@@ -528,7 +598,13 @@ export default function FaceAttendance() {
             <View style={styles.statusDot} />
           )}
           <Text style={styles.statusText}>
-            {phase === "matched" ? "Match found" : "Scanning…"}
+            {phase === "matched"
+              ? "Match found"
+              : phase === "unmatched"
+              ? "Unknown face"
+              : facesInFrame === 0
+              ? "Waiting for face"
+              : "Scanning…"}
           </Text>
         </View>
 
@@ -749,6 +825,66 @@ export default function FaceAttendance() {
 
             <PrimaryButton
               testID="continue-scan-button"
+              label="Continue Scanning"
+              onPress={resumeScan}
+              iconRight="scan-outline"
+            />
+          </View>
+        </View>
+      </Modal>
+
+      {/* Unknown-face modal — shown when the server detects a face but no
+          enrolled employee matches. Auto-dismisses after 5 s. */}
+      <Modal
+        visible={phase === "unmatched"}
+        transparent
+        animationType="fade"
+        onRequestClose={resumeScan}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.matchCard}>
+            <View style={styles.matchTopRow}>
+              <View style={styles.badgeRed}>
+                <Ionicons
+                  name="close-circle"
+                  size={16}
+                  color={colors.danger ?? "#DC2626"}
+                />
+                <Text style={styles.badgeRedText}>Face not recognised</Text>
+              </View>
+              <Pressable
+                onPress={resumeScan}
+                hitSlop={10}
+                testID="close-unmatched-modal"
+              >
+                <Ionicons
+                  name="close"
+                  size={22}
+                  color={colors.textSecondary}
+                />
+              </Pressable>
+            </View>
+
+            <View style={styles.unknownIconWrap}>
+              <Ionicons
+                name="person-remove-outline"
+                size={44}
+                color={colors.danger ?? "#DC2626"}
+              />
+            </View>
+
+            <Text style={styles.matchName} testID="unmatched-title">
+              No Employee Found
+            </Text>
+            <Text style={styles.matchNameHi}>कोई कर्मचारी नहीं मिला</Text>
+            <Text style={[styles.matchMeta, { textAlign: "center" }]}>
+              This face is not enrolled. Ask an admin to add or enrol the
+              employee before scanning again.
+            </Text>
+
+            <View style={{ height: 12 }} />
+            <PrimaryButton
+              testID="continue-scan-unmatched-button"
               label="Continue Scanning"
               onPress={resumeScan}
               iconRight="scan-outline"
@@ -1056,6 +1192,31 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   badgeGreenText: { color: colors.success, fontWeight: "700", fontSize: 12 },
+  badgeRed: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: colors.dangerSoft ?? "#FEE2E2",
+    borderRadius: 999,
+  },
+  badgeRedText: {
+    color: colors.danger ?? "#DC2626",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  unknownIconWrap: {
+    alignSelf: "center",
+    width: 96,
+    height: 96,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.dangerSoft ?? "#FEE2E2",
+    marginTop: 8,
+    marginBottom: 6,
+  },
   matchAvatarWrap: {
     alignSelf: "center",
     marginTop: 16,

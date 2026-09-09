@@ -543,7 +543,10 @@ class AttendanceIn(BaseModel):
 
 class FaceMatchIn(BaseModel):
     image_b64: str
-    type: str = Field(default="Check-in", pattern="^(Check-in|Check-out)$")
+    # "Auto" means the server picks Check-in or Check-out per-employee based
+    # on their last attendance record today. Kept as the default so
+    # hands-free scanning "just works".
+    type: str = Field(default="Auto", pattern="^(Check-in|Check-out|Auto)$")
     threshold: float = Field(default=0.60, ge=0.30, le=0.80)
 
 
@@ -1320,9 +1323,30 @@ def match_face(payload: FaceMatchIn):
                 continue
 
             already_matched_ids.add(best_emp.id)
+
+            # If the client asked for "Auto", decide Check-in vs Check-out
+            # per-employee: look at the employee's most-recent attendance
+            # row today; if it was Check-in, this one is Check-out;
+            # otherwise (Check-out or no record) it's Check-in.
+            if payload.type == "Auto":
+                last = (
+                    db.query(AttendanceRecord)
+                    .filter(
+                        AttendanceRecord.employee_id == best_emp.id,
+                        AttendanceRecord.day == now_ist().date(),
+                    )
+                    .order_by(AttendanceRecord.marked_at.desc())
+                    .first()
+                )
+                resolved_type = (
+                    "Check-out" if (last and last.type == "Check-in") else "Check-in"
+                )
+            else:
+                resolved_type = payload.type
+
             rec = AttendanceRecord(
                 employee_id=best_emp.id,
-                type=payload.type,
+                type=resolved_type,
                 time=ist_time_str(),
                 status="On Time",
             )

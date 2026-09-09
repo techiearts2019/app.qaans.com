@@ -270,7 +270,9 @@ export const api = {
 
   matchFace: (payload: {
     image_b64: string;
-    type: "Check-in" | "Check-out";
+    /** "Auto" (default) lets the backend decide Check-in vs Check-out per
+     *  employee based on their last record today. */
+    type: "Check-in" | "Check-out" | "Auto";
     threshold?: number;
   }) =>
     request<FaceMatchResult>("/attendance/match", {

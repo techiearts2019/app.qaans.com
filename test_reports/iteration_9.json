@@ -1,0 +1,35 @@
+{
+  "summary": "Verified user-reported camera-reinit fix on the Attendance tab. All 7 checkpoints in /app/frontend/app/(tabs)/attendance.tsx were confirmed via source read + grep: (1) `cameraSession` state exists at line 50; (2) it is bumped inside useFocusEffect's focus branch at line 96 (`setCameraSession((s) => s + 1)`); (3) CameraView is keyed with `key={`cam-${cameraSession}`}` at line 463 which forces a full native surface remount on every re-focus; (4) focus branch resets cameraReady=false (L90), busyRef.current=false (L91), inFlight=false (L92), scanError=null (L93), boxes=[] (L94), facesInFrame=0 (L95), phase='scanning' (L98), isFocused=true (L97); (5) cleanup/blur branch resets isFocused=false (L105), phase='idle' (L106), cameraReady=false (L107), busyRef.current=false (L108), inFlight=false (L109) and calls Speech.stop() (L111); (6) inside the polling `tick`, `setCameraReady(false)` fires both when pic?.uri is missing (L210) and in the catch branch (L282) so the loop stops hammering an unresponsive camera; (7) initial mount useEffect at lines 121-125 still calls setIsFocused(true) + setPhase('scanning') as a belt-and-braces fallback for Android release builds. Backend regression: pytest on all 8 test modules → 59 passed / 0 failed in 446s (junit at /app/test_reports/pytest/iter9_results.xml). Web preview (Expo web) loads cleanly at the welcome screen with no red screen and no pageerror; only benign warnings about shadow* deprecation and useNativeDriver on web. No headless camera-cycle simulation is feasible in the web preview (getUserMedia + CameraView.takePictureAsync are not exercisable without an actual camera), which is called out as an acceptable limitation in the review request. Code review of the fix is sound — the `key` remount is the canonical React idiom to force expo-camera's native surface to tear down and re-init, and pairing it with a state reset on focus + a cameraReady invalidation on missing frame prevents the exact 'Camera did not return a frame' loop described by the user.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/pytest/iter9_results.xml",
+    "/app/backend/tests/"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "attendance.tsx:463 `key={`cam-${cameraSession}`}` on CameraView is the correct approach — remounting the component tears down the native camera session so `takePictureAsync` no longer resolves with an undefined URI on subsequent visits.",
+    "attendance.tsx:88-117 The focus branch resets every piece of state that could survive the previous session (cameraReady, busyRef, inFlight, scanError, boxes, facesInFrame, phase) BEFORE bumping cameraSession — the order is important because if cameraReady stayed true from the previous mount, the polling effect would fire tick() against a not-yet-ready fresh CameraView.",
+    "attendance.tsx:206-213, 275-286 Both the 'no URI returned' branch and the catch branch call setCameraReady(false), which pauses the polling effect (gated by cameraReady at L186) until the next onCameraReady fires — this is the guard that prevents the earlier 'hammer an unresponsive camera every 1.5s' failure mode.",
+    "attendance.tsx:104-115 Cleanup branch also calls Speech.stop() so no announcement leaks into the next screen — good practice.",
+    "attendance.tsx:296 useEffect deps `[phase, isFocused, action, cameraReady, permission?.granted]` correctly excludes cameraSession — the effect doesn't need to re-run on remount because cameraReady already flips false→true after the fresh surface reports ready."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (59/59 pytest across face_attendance, timezone_attendance, employee_out_schema, create_employee_photo, face_box_overlay, face_quality_multi, update_employee — junit at /app/test_reports/pytest/iter9_results.xml)",
+    "frontend": "Code review 100%; web preview loads cleanly (welcome screen renders, no red screen, no pageerror). Camera flow itself cannot be exercised headlessly in the web preview — acceptable per review-request note."
+  },
+  "seed_data_creation": "No new seed data. Test session used the existing conftest.py-managed DHD-1042 employee + techiearts19@gmail.com supervisor rows which are torn down at session end.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The camera-remount fix is verified statically because expo-camera's native surface cannot be exercised in web preview. For a true user-facing regression test the QA build must be installed on a physical device and the Attendance tab must be opened → navigated away → reopened at least 3 times, with a live capture on each visit. In-code, all 7 checkpoints from the review request are present at the referenced line numbers; any future edit should preserve (a) the CameraView `key` binding to cameraSession, (b) the focus-branch state resets, and (c) both setCameraReady(false) calls inside tick.",
+  "rca_of_issue": "USER-REPORTED BUG: Attendance camera worked on first open but subsequent visits produced a persistent red 'Camera did not return a frame. Retrying…' banner. ROOT CAUSE: expo-camera's <CameraView> was reused across screen focus cycles; when the screen was blurred the native camera session was released by expo-router's unfocus but the React component wasn't remounted, so on refocus `cameraReady` was stale (from the previous session) and the 1.5s polling effect fired takePictureAsync against a native camera that was mid-reinit — the promise resolved with `pic.uri === undefined`, triggering the error banner. The old code had no mechanism to (a) force the native surface to tear down or (b) invalidate cameraReady when the URI came back undefined, so it stayed stuck. FIX APPLIED BY MAIN AGENT (verified this iteration): (1) Introduced `cameraSession` counter bumped inside useFocusEffect's focus branch. (2) Bound `key={`cam-${cameraSession}`}` on CameraView so every focus does a full unmount → remount of the native surface. (3) Reset cameraReady/busyRef/inFlight/scanError/boxes/facesInFrame/phase on focus and again on cleanup. (4) Added defensive setCameraReady(false) inside tick when pic.uri is falsy AND in the catch branch so the polling effect self-pauses until the fresh onCameraReady fires. MITIGATION for future edits: preserve all seven checkpoints listed in the review request; add a device-based regression note that verifies at least 3 focus/blur cycles."
+}
